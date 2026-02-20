@@ -39,15 +39,14 @@ def open_position(signal):
     is_buy = True if signal == "BUY" else False
 
     account_value = get_account_value()
-    size = account_value * POSITION_PERCENT * LEVERAGE
+    size = account_value * POSITION_PERCENT
 
     print("Opening position:", signal, "Size:", size)
 
-    exchange.order(
+    exchange.market_open(
         SYMBOL,
         is_buy,
-        size,
-        {"limitPx": None}
+        size
     )
 
     current_position = signal
