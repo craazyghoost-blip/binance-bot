@@ -91,8 +91,8 @@ async def webhook(request: Request):
 
     # Ters sinyal gelirse kapat
     if current_position and current_position != signal:
-    close_position()
-    time.sleep(1)   # margin güncellensin
+        close_position()
+        time.sleep(1)
 
 open_position(signal)
 
