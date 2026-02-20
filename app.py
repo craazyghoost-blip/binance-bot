@@ -1,81 +1,24 @@
-
 import os
-import time
-from flask import Flask, request, jsonify
-from binance.client import Client
-from binance.enums import *
+from fastapi import FastAPI
+from hyperliquid.exchange import Exchange
 
-app = Flask(__name__)
+app = FastAPI()
 
-api_key = os.environ.get("API_KEY")
-api_secret = os.environ.get("API_SECRET")
+PRIVATE_KEY = os.getenv("API_SECRET")
+SYMBOL = os.getenv("SYMBOL")
+SIDE = os.getenv("SIDE")
+SIZE = float(os.getenv("QUANTITY"))
 
-client = Client(api_key, api_secret)
+exchange = Exchange(PRIVATE_KEY)
 
-SYMBOL = "BTCUSDT"
-LEVERAGE = 2
+@app.get("/")
+def place_order():
+    is_buy = True if SIDE == "BUY" else False
 
-last_signal_time = 0
+    exchange.market_open(
+        name=SYMBOL,
+        is_buy=is_buy,
+        sz=SIZE,
+    )
 
-def close_position():
-    try:
-        positions = client.futures_position_information(symbol=SYMBOL)
-        for p in positions:
-            amt = float(p['positionAmt'])
-            if amt > 0:
-                client.futures_create_order(
-                    symbol=SYMBOL,
-                    side=SIDE_SELL,
-                    type=ORDER_TYPE_MARKET,
-                    quantity=abs(amt)
-                )
-            elif amt < 0:
-                client.futures_create_order(
-                    symbol=SYMBOL,
-                    side=SIDE_BUY,
-                    type=ORDER_TYPE_MARKET,
-                    quantity=abs(amt)
-                )
-    except Exception as e:
-        print("Close error:", e)
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    global last_signal_time
-
-    data = request.json
-    signal = data.get("signal")
-
-    try:
-        client.futures_change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
-
-        close_position()
-
-        qty = 0.001  # İstersen değiştir
-
-        if signal == "long":
-            client.futures_create_order(
-                symbol=SYMBOL,
-                side=SIDE_BUY,
-                type=ORDER_TYPE_MARKET,
-                quantity=qty
-            )
-
-        elif signal == "short":
-            client.futures_create_order(
-                symbol=SYMBOL,
-                side=SIDE_SELL,
-                type=ORDER_TYPE_MARKET,
-                quantity=qty
-            )
-
-        last_signal_time = time.time()
-
-        return jsonify({"status": "ok"})
-
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-@app.route("/")
-def home():
-    return "Bot çalışıyor"
+    return {"status": "order sent"}
