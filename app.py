@@ -9,13 +9,13 @@ SYMBOL = os.getenv("SYMBOL")
 SIDE = os.getenv("SIDE")
 SIZE = float(os.getenv("QUANTITY"))
 
-client = Client(private_key=PRIVATE_KEY)
+exchange = Exchange(PRIVATE_KEY)
 
 @app.get("/")
 def place_order():
     is_buy = True if SIDE == "BUY" else False
 
-    client.market_open(
+    exchange.market_open(
         name=SYMBOL,
         is_buy=is_buy,
         sz=SIZE
