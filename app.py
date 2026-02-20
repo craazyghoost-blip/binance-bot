@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from hyperliquid import Exchange
+from hyperliquid.exchange import Exchange
 from eth_account import Account
 import os
 import time
