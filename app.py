@@ -1,6 +1,6 @@
 import os
 from fastapi import FastAPI
-from hyperliquid import Exchange
+from hyperliquid.client import Client
 
 app = FastAPI()
 
@@ -9,16 +9,16 @@ SYMBOL = os.getenv("SYMBOL")
 SIDE = os.getenv("SIDE")
 SIZE = float(os.getenv("QUANTITY"))
 
-exchange = Exchange(PRIVATE_KEY)
+client = Client(private_key=PRIVATE_KEY)
 
 @app.get("/")
 def place_order():
     is_buy = True if SIDE == "BUY" else False
 
-    exchange.market_open(
+    client.market_open(
         name=SYMBOL,
         is_buy=is_buy,
-        sz=SIZE,
+        sz=SIZE
     )
 
     return {"status": "order sent"}
