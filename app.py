@@ -1,6 +1,6 @@
 import os
 from fastapi import FastAPI
-from hyperliquid.exchange import Exchange
+from hyperliquid import Exchange
 
 app = FastAPI()
 
