@@ -1,4 +1,4 @@
-hyperliquid
+hyperliquid-python
 fastapi
 uvicorn
 gunicorn
