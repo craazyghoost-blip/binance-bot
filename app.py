@@ -41,9 +41,9 @@ def open_position(signal):
         print("Balance is zero.")
         return
 
-    # BTC fiyatını al
-    price_data = exchange.info.meta()
-    btc_price = float(price_data["universe"][0]["markPx"])
+    # Doğru fiyat alma
+    mids = exchange.info.all_mids()
+    btc_price = float(mids["BTC"])
 
     btc_size = usd_size / btc_price
 
@@ -58,7 +58,6 @@ def open_position(signal):
     print("ORDER RESULT:", result)
 
     current_position = signal
-
 def close_position():
     global current_position
     print("Closing position")
