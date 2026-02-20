@@ -1,6 +1,5 @@
+git+https://github.com/hyperliquid-dex/hyperliquid-python-sdk.git
+eth-account
 fastapi
 uvicorn
 gunicorn
-requests
-hyperliquid
-eth-account
