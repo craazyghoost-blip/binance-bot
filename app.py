@@ -19,6 +19,7 @@ if not PRIVATE_KEY:
     raise Exception("PRIVATE_KEY not set")
 
 account = Account.from_key(PRIVATE_KEY)
+print("BOT ADDRESS:", account.address)
 exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
 
 current_position = None
