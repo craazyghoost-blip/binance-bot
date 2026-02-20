@@ -35,17 +35,25 @@ def open_position(signal):
     global current_position
 
     account_value = get_account_value()
-    size = account_value * POSITION_PERCENT
+    usd_size = account_value * POSITION_PERCENT
 
-    if size <= 0:
+    if usd_size <= 0:
         print("Balance is zero.")
         return
 
+    # BTC fiyatını al
+    price_data = exchange.info.meta()
+    btc_price = float(price_data["universe"][0]["markPx"])
+
+    btc_size = usd_size / btc_price
+
     is_buy = True if signal == "BUY" else False
 
-    print("Opening position:", signal, "Size:", size)
+    print("Opening position:", signal)
+    print("USD size:", usd_size)
+    print("BTC size:", btc_size)
 
-    result = exchange.market_open(SYMBOL, is_buy, size)
+    result = exchange.market_open(SYMBOL, is_buy, btc_size)
 
     print("ORDER RESULT:", result)
 
