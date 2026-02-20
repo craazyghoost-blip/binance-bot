@@ -29,6 +29,7 @@ last_signal_time = 0
 
 def get_account_value():
     state = exchange.info.user_state(account.address)
+    print("USER STATE:", state)
     return float(state["marginSummary"]["accountValue"])
 
 
