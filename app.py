@@ -79,22 +79,17 @@ async def webhook(request: Request):
 
     now = time.time()
 
-    # Cooldown
-    if now - last_signal_time < TIMEOUT_SECONDS:
-        print("Cooldown active.")
-        return {"status": "cooldown"}
-
     # Aynı sinyal tekrar gelirse işlem yapma
     if current_position == signal:
         print("Same position already open.")
         return {"status": "same_position"}
 
-    # Ters sinyal gelirse kapat
+    # Ters sinyal geldiyse kapat
     if current_position and current_position != signal:
         close_position()
         time.sleep(1)
 
-open_position(signal)
+    open_position(signal)
 
     last_signal_time = now
 
