@@ -1,3 +1,4 @@
 hyperliquid
 fastapi
 uvicorn
+gunicorn
