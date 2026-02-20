@@ -45,10 +45,11 @@ def open_position(signal):
 
     print("Opening position:", signal, "Size:", size)
 
-    exchange.market_open(SYMBOL, is_buy, size)
+    result = exchange.market_open(SYMBOL, is_buy, size)
+
+    print("ORDER RESULT:", result)
 
     current_position = signal
-
 
 def close_position():
     global current_position
