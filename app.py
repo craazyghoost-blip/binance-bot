@@ -45,7 +45,7 @@ def open_position(signal):
     mids = exchange.info.all_mids()
     btc_price = float(mids["BTC"])
 
-    btc_size = usd_size / btc_price
+    btc_size = round(usd_size / btc_price, 5)
 
     is_buy = True if signal == "BUY" else False
 
