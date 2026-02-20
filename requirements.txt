@@ -2,3 +2,5 @@ fastapi
 uvicorn
 gunicorn
 requests
+hyperliquid
+eth-account
