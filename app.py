@@ -66,11 +66,11 @@ def close_position():
 
 
 @app.post("/webhook")
-async def webhook(data: Signal):
+async def webhook(request: Request):
     global current_position, last_signal_time
 
-    data = await request.json()
-    signal = data.get("signal")
+    body = await request.json()
+    signal = body.get("signal")
 
     print("SIGNAL RECEIVED:", signal)
 
@@ -79,7 +79,7 @@ async def webhook(data: Signal):
 
     now = time.time()
 
-    # Aynı sinyal tekrar gelirse işlem yapma
+    # Aynı pozisyon varsa işlem yapma
     if current_position == signal:
         print("Same position already open.")
         return {"status": "same_position"}
