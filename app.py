@@ -94,3 +94,6 @@ async def webhook(data: Signal):
     last_signal_time = now
 
     return {"status": "ok"}
+@app.get("/")
+def root():
+    return {"status": "alive"}
