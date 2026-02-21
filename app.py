@@ -66,7 +66,7 @@ def close_position():
 
 
 @app.post("/webhook")
-async def webhook(request: Request):
+async def webhook(data: Signal):
     global current_position, last_signal_time
 
     data = await request.json()
