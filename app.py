@@ -1,6 +1,5 @@
 import os
 import time
-import threading
 from fastapi import FastAPI, Request
 from eth_account import Account
 from hyperliquid.exchange import Exchange
@@ -11,7 +10,6 @@ app = FastAPI()
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "BTC"
 POSITION_PERCENT = 0.9
-TIMEOUT_SECONDS = 300
 # ==================
 
 if not PRIVATE_KEY:
@@ -23,7 +21,6 @@ print("BOT ADDRESS:", account.address)
 exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
 
 current_position = None
-position_open_time = None
 
 
 def get_account_value():
@@ -32,7 +29,7 @@ def get_account_value():
 
 
 def open_position(signal):
-    global current_position, position_open_time
+    global current_position
 
     account_value = get_account_value()
     usd_size = account_value * POSITION_PERCENT
@@ -54,36 +51,18 @@ def open_position(signal):
     print("ORDER RESULT:", result)
 
     current_position = signal
-    position_open_time = time.time()
 
 
 def close_position():
-    global current_position, position_open_time
+    global current_position
 
     if current_position is None:
         return
 
-    print("Closing position after 300 seconds")
+    print("Closing position")
     exchange.market_close(SYMBOL)
 
     current_position = None
-    position_open_time = None
-
-
-# 🔥 Arka planda sürekli çalışan zaman kontrolü
-def timeout_watcher():
-    global current_position, position_open_time
-
-    while True:
-        if current_position and position_open_time:
-            elapsed = time.time() - position_open_time
-            if elapsed >= TIMEOUT_SECONDS:
-                close_position()
-        time.sleep(1)
-
-
-# Thread başlat
-threading.Thread(target=timeout_watcher, daemon=True).start()
 
 
 @app.post("/webhook")
@@ -98,11 +77,9 @@ async def webhook(request: Request):
     if signal not in ["BUY", "SELL"]:
         return {"status": "ignored"}
 
-    # Aynı pozisyon varsa işlem yapma
     if current_position == signal:
         return {"status": "same_position"}
 
-    # Ters sinyal geldiyse kapat
     if current_position and current_position != signal:
         close_position()
         time.sleep(1)
