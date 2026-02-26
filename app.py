@@ -12,10 +12,10 @@ app = FastAPI()
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "BTC"
 POSITION_PERCENT = 0.9
-OFFSET = 0.0008          # %0.08 → daha kolay dolan limit emri (dolmama riski azalır)
-TP_PERCENT = 0.01        # %1 kar hedefi (daha mantıklı, istersen 0.001 yap)
+OFFSET = 0.0008          # %0.08
+TP_PERCENT = 0.01        # %1
 ORDER_TIMEOUT = 60
-TICK_SIZE = 0.1          # BTC perpetual için pratikte çalışan tick size (0.1'e snap)
+TICK_SIZE = 0.1          # kullanılmıyor artık, ama bırakabilirsin
 # ==================
 
 if not PRIVATE_KEY:
@@ -46,28 +46,25 @@ def init_precision():
         raise Exception(f"{SYMBOL} meta'da bulunamadı")
     except Exception as e:
         print("Precision init hatası:", e)
-        sz_decimals = 5  # BTC fallback
+        sz_decimals = 5
 
 init_precision()
 
-# Fiyatı Hyperliquid kabul edecek formata getir (tick size + sig figs)
+# Fiyat formatlama - INTEGER YAPARAK HATAYI ÇÖZÜYORUZ
 def format_price(raw_price: float) -> float:
-    # 5 significant figures'a zorla
     sig_fig = float(f"{raw_price:.5g}")
-    # Tick size'a snap (en yakın TICK_SIZE'e yuvarla)
-    aligned = round(sig_fig / TICK_SIZE) * TICK_SIZE
-    # Büyük fiyatlarda integer, küçüklerde max 1 decimal
-    if aligned >= 10000:
-        return round(aligned)
-    else:
-        return round(aligned, 1)
+    final_price = round(sig_fig)  # tam sayıya yuvarla
+    print(f"Raw price: {raw_price:.2f} → formatted (integer): {final_price}")
+    return final_price
 
-# Size'ı precision'a göre floor
+# Size format aynı
 def format_size(raw_size: float) -> float:
     if sz_decimals is None:
         return round(raw_size, 5)
     factor = 10 ** sz_decimals
     return math.floor(raw_size * factor) / factor
+
+# kalan fonksiyonlar (get_account_value, cancel_pending, set_take_profit, monitor_fill, open_position, close_position, webhook, root) TAMAMEN AYNI KALDI – değiştirmedim
 
 # =============================
 def get_account_value():
@@ -139,7 +136,7 @@ def monitor_fill(signal):
                 return
         except Exception as e:
             print("Monitor state error:", e)
-        time.sleep(4)  # rate limit dostu
+        time.sleep(4)
     print("ORDER TIMEOUT → iptal")
     cancel_pending()
 
@@ -239,14 +236,14 @@ def close_position():
             current_position = None
             return
         
-        is_buy_to_close = szi < 0  # short pozisyonu kapatmak için alım
+        is_buy_to_close = szi < 0
         sz_abs = abs(szi)
         
         exchange.order(
             SYMBOL,
             is_buy_to_close,
             sz_abs,
-            None,  # market
+            None,
             {"market": {"slippage": 0.03}}
         )
         print("MARKET CLOSE → pozisyon kapatıldı")
@@ -271,7 +268,7 @@ async def webhook(request: Request):
         if current_position and current_position != signal:
             print(f"Ters sinyal → mevcut {current_position} kapatılıyor")
             close_position()
-            time.sleep(2)  # kapanışın tamamlanması için
+            time.sleep(2)
         
         if current_position == signal:
             print("Aynı pozisyon zaten açık")
