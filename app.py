@@ -1,5 +1,6 @@
 import os
 import time
+import threading
 from fastapi import FastAPI, Request
 from eth_account import Account
 from hyperliquid.exchange import Exchange
@@ -11,9 +12,9 @@ PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "BTC"
 POSITION_PERCENT = 0.9
 
-OFFSET = 0.0002      # %0.02
-TP_PERCENT = 0.001   # %0.1
-ORDER_TIMEOUT = 180  # 3 dakika
+OFFSET = 0.0002
+TP_PERCENT = 0.001
+ORDER_TIMEOUT = 60
 # ==================
 
 if not PRIVATE_KEY:
@@ -25,18 +26,15 @@ print("BOT ADDRESS:", account.address)
 exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
 
 current_position = None
+pending_order = False
 
 
-# =============================
-# ACCOUNT VALUE
 # =============================
 def get_account_value():
     state = exchange.info.user_state(account.address)
     return float(state["marginSummary"]["accountValue"])
 
 
-# =============================
-# TAKE PROFIT
 # =============================
 def set_take_profit(signal):
 
@@ -58,8 +56,6 @@ def set_take_profit(signal):
         tp_price = entry_price * (1 - TP_PERCENT)
         is_buy = True
 
-    print("SETTING TP:", tp_price)
-
     exchange.order(
         SYMBOL,
         is_buy,
@@ -68,19 +64,46 @@ def set_take_profit(signal):
         {"limit": {"tif": "Gtc"}}
     )
 
+    print("TP SET:", tp_price)
+
 
 # =============================
-# OPEN POSITION (LIMIT MAKER)
+def monitor_fill(signal):
+
+    global current_position, pending_order
+
+    start_time = time.time()
+
+    while time.time() - start_time < ORDER_TIMEOUT:
+
+        state = exchange.info.user_state(account.address)
+        positions = state["assetPositions"]
+
+        if len(positions) > 0:
+            print("POSITION FILLED")
+            current_position = signal
+            pending_order = False
+            set_take_profit(signal)
+            return
+
+        time.sleep(2)
+
+    print("ORDER TIMEOUT → CANCEL")
+    exchange.cancel_all(SYMBOL)
+    pending_order = False
+
+
 # =============================
 def open_position(signal):
-    global current_position
+
+    global pending_order
+
+    if pending_order:
+        print("Order already pending")
+        return
 
     account_value = get_account_value()
     usd_size = account_value * POSITION_PERCENT
-
-    if usd_size <= 0:
-        print("Balance zero")
-        return
 
     mids = exchange.info.all_mids()
     btc_price = float(mids["BTC"])
@@ -103,28 +126,15 @@ def open_position(signal):
         {"limit": {"tif": "Gtc"}}
     )
 
-    start_time = time.time()
+    pending_order = True
 
-    # ===== 3 DK FILL BEKLE =====
-    while time.time() - start_time < ORDER_TIMEOUT:
-
-        state = exchange.info.user_state(account.address)
-        positions = state["assetPositions"]
-
-        if len(positions) > 0:
-            print("POSITION FILLED")
-            current_position = signal
-            set_take_profit(signal)
-            return
-
-        time.sleep(2)
-
-    print("ORDER TIMEOUT → CANCEL")
-    exchange.cancel_all(SYMBOL)
+    threading.Thread(
+        target=monitor_fill,
+        args=(signal,),
+        daemon=True
+    ).start()
 
 
-# =============================
-# CLOSE POSITION
 # =============================
 def close_position():
     global current_position
@@ -134,16 +144,14 @@ def close_position():
 
     print("Closing position")
     exchange.market_close(SYMBOL)
-
     current_position = None
 
 
 # =============================
-# WEBHOOK
-# =============================
 @app.post("/webhook")
 async def webhook(request: Request):
-    global current_position
+
+    global current_position, pending_order
 
     body = await request.json()
     signal = body.get("signal")
@@ -153,12 +161,19 @@ async def webhook(request: Request):
     if signal not in ["BUY", "SELL"]:
         return {"status": "ignored"}
 
-    if current_position == signal:
-        return {"status": "same_position"}
+    # ✅ BEKLEYEN LIMIT VARSA İPTAL
+    if pending_order:
+        print("Cancel pending limit")
+        exchange.cancel_all(SYMBOL)
+        pending_order = False
 
+    # ✅ TERS POZİSYON KAPAT
     if current_position and current_position != signal:
         close_position()
         time.sleep(1)
+
+    if current_position == signal:
+        return {"status": "same_position"}
 
     open_position(signal)
 
