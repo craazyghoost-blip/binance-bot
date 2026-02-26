@@ -112,7 +112,7 @@ def monitor_fill(signal):
 # =============================
 def open_position(signal):
 
-    global pending_order, current_order_id
+    global pending_order, current_order_id, current_position
 
     if pending_order:
         print("Order already pending")
@@ -142,15 +142,35 @@ def open_position(signal):
         {"limit": {"tif": "Gtc"}}
     )
 
-    # ✅ ORDER ID AL
-    current_order_id = order["response"]["data"]["statuses"][0]["resting"]["oid"]
-    pending_order = True
+    status = order["response"]["data"]["statuses"][0]
 
-    threading.Thread(
-        target=monitor_fill,
-        args=(signal,),
-        daemon=True
-    ).start()
+    # ===== MAKER ORDER =====
+    if "resting" in status:
+        print("RESTING ORDER")
+
+        current_order_id = status["resting"]["oid"]
+        pending_order = True
+
+        threading.Thread(
+            target=monitor_fill,
+            args=(signal,),
+            daemon=True
+        ).start()
+
+    # ===== INSTANT FILL =====
+    elif "filled" in status:
+        print("INSTANT FILL")
+
+        current_order_id = None
+        pending_order = False
+        current_position = signal
+
+        set_take_profit(signal)
+
+    else:
+        print("UNKNOWN STATUS:", status)
+        current_order_id = None
+        pending_order = False
 
 
 # =============================
@@ -179,10 +199,8 @@ async def webhook(request: Request):
     if signal not in ["BUY", "SELL"]:
         return {"status": "ignored"}
 
-    # ✅ eski limit iptal
     cancel_pending()
 
-    # ✅ ters pozisyon kapat
     if current_position and current_position != signal:
         close_position()
         time.sleep(1)
