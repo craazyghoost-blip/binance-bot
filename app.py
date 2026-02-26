@@ -12,9 +12,10 @@ app = FastAPI()
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "BTC"
 POSITION_PERCENT = 0.9
-OFFSET = 0.0005          # 0.0002 çok küçüktü, dolmama riski yüksek → 0.05% yaptım (daha gerçekçi)
-TP_PERCENT = 0.005       # %0.1 → %0.5 yaptım (daha mantıklı, istersen eski haline çevir)
+OFFSET = 0.0008          # %0.08 → daha kolay dolan limit emri (dolmama riski azalır)
+TP_PERCENT = 0.01        # %1 kar hedefi (daha mantıklı, istersen 0.001 yap)
 ORDER_TIMEOUT = 60
+TICK_SIZE = 0.1          # BTC perpetual için pratikte çalışan tick size (0.1'e snap)
 # ==================
 
 if not PRIVATE_KEY:
@@ -30,7 +31,7 @@ current_position = None
 pending_order = False
 current_order_id = None
 
-# Startup'ta bir kere çekilecek precision bilgileri
+# Startup'ta precision
 sz_decimals = None
 
 def init_precision():
@@ -45,20 +46,23 @@ def init_precision():
         raise Exception(f"{SYMBOL} meta'da bulunamadı")
     except Exception as e:
         print("Precision init hatası:", e)
-        sz_decimals = 5  # fallback (BTC genelde 5)
+        sz_decimals = 5  # BTC fallback
 
 init_precision()
 
-# Fiyatı Hyperliquid'in kabul edeceği temiz formata getir
+# Fiyatı Hyperliquid kabul edecek formata getir (tick size + sig figs)
 def format_price(raw_price: float) -> float:
-    if sz_decimals is None:
-        return round(raw_price, 1)  # fallback
-    
-    # Perpetual'lar için genelde 1 ondalık basamak + tick size uyumu
-    # Basit ve güvenli: 1 ondalığa yuvarla (BTC için yaygın)
-    return round(raw_price, 1)
+    # 5 significant figures'a zorla
+    sig_fig = float(f"{raw_price:.5g}")
+    # Tick size'a snap (en yakın TICK_SIZE'e yuvarla)
+    aligned = round(sig_fig / TICK_SIZE) * TICK_SIZE
+    # Büyük fiyatlarda integer, küçüklerde max 1 decimal
+    if aligned >= 10000:
+        return round(aligned)
+    else:
+        return round(aligned, 1)
 
-# Size'ı precision'a göre floor (güvenli tarafa yuvarla)
+# Size'ı precision'a göre floor
 def format_size(raw_size: float) -> float:
     if sz_decimals is None:
         return round(raw_size, 5)
@@ -67,8 +71,12 @@ def format_size(raw_size: float) -> float:
 
 # =============================
 def get_account_value():
-    state = exchange.info.user_state(account.address)
-    return float(state["marginSummary"]["accountValue"])
+    try:
+        state = exchange.info.user_state(account.address)
+        return float(state["marginSummary"]["accountValue"])
+    except Exception as e:
+        print("Account value error:", e)
+        return 0.0
 
 # =============================
 def cancel_pending():
@@ -84,25 +92,25 @@ def cancel_pending():
 
 # =============================
 def set_take_profit(signal):
-    state = exchange.info.user_state(account.address)
-    positions = state.get("assetPositions", [])
-    if not positions:
-        return
-    
-    pos = positions[0]["position"]
-    entry_price = float(pos["entryPx"])
-    size = abs(float(pos["szi"]))
-    
-    if signal == "BUY":  # long pozisyon → TP sat
-        raw_tp = entry_price * (1 + TP_PERCENT)
-        is_buy_tp = False
-    else:                # short pozisyon → TP al
-        raw_tp = entry_price * (1 - TP_PERCENT)
-        is_buy_tp = True
-    
-    tp_price = format_price(raw_tp)
-    
     try:
+        state = exchange.info.user_state(account.address)
+        positions = state.get("assetPositions", [])
+        if not positions:
+            return
+        
+        pos = positions[0]["position"]
+        entry_price = float(pos["entryPx"])
+        size = abs(float(pos["szi"]))
+        
+        if signal == "BUY":  # long → TP sell
+            raw_tp = entry_price * (1 + TP_PERCENT)
+            is_buy_tp = False
+        else:                # short → TP buy
+            raw_tp = entry_price * (1 - TP_PERCENT)
+            is_buy_tp = True
+        
+        tp_price = format_price(raw_tp)
+        
         exchange.order(
             SYMBOL,
             is_buy_tp,
@@ -110,40 +118,50 @@ def set_take_profit(signal):
             tp_price,
             {"limit": {"tif": "Gtc"}}
         )
-        print(f"TP SET: {tp_price} (raw: {raw_tp:.2f})")
+        print(f"TP SET: {tp_price} (raw ~ {raw_tp:.1f})")
     except Exception as e:
-        print("TP order hatası:", e)
+        print("TP set error:", e)
 
 # =============================
 def monitor_fill(signal):
     global current_position, pending_order, current_order_id
     start = time.time()
     while time.time() - start < ORDER_TIMEOUT:
-        state = exchange.info.user_state(account.address)
-        positions = state.get("assetPositions", [])
-        if positions:
-            print("POSITION FILLED")
-            current_position = signal
-            pending_order = False
-            current_order_id = None
-            set_take_profit(signal)
-            return
-        time.sleep(3)  # rate limit için 3 sn'ye çıkardım
-    print("ORDER TIMEOUT")
+        try:
+            state = exchange.info.user_state(account.address)
+            positions = state.get("assetPositions", [])
+            if positions:
+                print("POSITION FILLED → signal:", signal)
+                current_position = signal
+                pending_order = False
+                current_order_id = None
+                set_take_profit(signal)
+                return
+        except Exception as e:
+            print("Monitor state error:", e)
+        time.sleep(4)  # rate limit dostu
+    print("ORDER TIMEOUT → iptal")
     cancel_pending()
 
 # =============================
 def open_position(signal):
     global pending_order, current_order_id, current_position
     if pending_order:
-        print("Order already pending")
+        print("Zaten pending order var, bekle")
         return
 
     try:
         account_value = get_account_value()
+        if account_value <= 0:
+            print("Hesap değeri sıfır veya alınamadı")
+            return
         usd_size = account_value * POSITION_PERCENT
+        
         mids = exchange.info.all_mids()
-        btc_price = float(mids[SYMBOL])
+        btc_price = float(mids.get(SYMBOL, 0))
+        if btc_price <= 0:
+            print("Mid price alınamadı")
+            return
         
         if signal == "BUY":
             is_buy = True
@@ -158,7 +176,7 @@ def open_position(signal):
         raw_btc_size = usd_size / btc_price
         btc_size = format_size(raw_btc_size)
         if btc_size <= 0:
-            print("Hesaplanan size çok küçük")
+            print("Size çok küçük veya sıfır")
             return
         
         print(f"Size: {btc_size}")
@@ -179,33 +197,28 @@ def open_position(signal):
         
         statuses = order_result["response"]["data"]["statuses"]
         
-        handled = False
         for status in statuses:
             if "resting" in status:
                 current_order_id = status["resting"]["oid"]
                 pending_order = True
-                print(f"RESTING ORDER - oid: {current_order_id}")
+                print(f"RESTING ORDER → oid: {current_order_id}")
                 threading.Thread(target=monitor_fill, args=(signal,), daemon=True).start()
-                handled = True
-                break
+                return
             elif "filled" in status:
-                print("INSTANT FILL")
+                print("INSTANT / FILLED")
                 current_order_id = None
                 pending_order = False
                 current_position = signal
                 set_take_profit(signal)
-                handled = True
-                break
+                return
             elif "error" in status:
                 print("ORDER ERROR:", status["error"])
-                handled = True
-                break
+                return
         
-        if not handled:
-            print("Bilinmeyen status yapısı:", statuses)
+        print("Beklenmeyen status:", statuses)
     
     except Exception as e:
-        print("open_position exception:", str(e))
+        print("open_position hatası:", str(e))
 
 # =============================
 def close_position():
@@ -226,20 +239,20 @@ def close_position():
             current_position = None
             return
         
-        is_buy_to_close = szi < 0  # short ise alım ile kapat
+        is_buy_to_close = szi < 0  # short pozisyonu kapatmak için alım
         sz_abs = abs(szi)
         
         exchange.order(
             SYMBOL,
             is_buy_to_close,
             sz_abs,
-            None,  # market order
-            {"market": {"slippage": 0.03}}  # %3 slippage toleransı
+            None,  # market
+            {"market": {"slippage": 0.03}}
         )
-        print("POSITION MARKET CLOSED")
+        print("MARKET CLOSE → pozisyon kapatıldı")
         current_position = None
     except Exception as e:
-        print("Close position hatası:", e)
+        print("Close hatası:", e)
 
 # =============================
 @app.post("/webhook")
@@ -256,17 +269,19 @@ async def webhook(request: Request):
         cancel_pending()
         
         if current_position and current_position != signal:
+            print(f"Ters sinyal → mevcut {current_position} kapatılıyor")
             close_position()
-            time.sleep(1.5)  # kapanışın tamamlanması için biraz bekle
+            time.sleep(2)  # kapanışın tamamlanması için
         
         if current_position == signal:
+            print("Aynı pozisyon zaten açık")
             return {"status": "same_position"}
         
         open_position(signal)
         return {"status": "ok"}
     
     except Exception as e:
-        print("Webhook exception:", str(e))
+        print("Webhook hatası:", str(e))
         return {"status": "error"}
 
 @app.get("/")
