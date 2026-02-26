@@ -27,12 +27,28 @@ exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
 
 current_position = None
 pending_order = False
+current_order_id = None
 
 
 # =============================
 def get_account_value():
     state = exchange.info.user_state(account.address)
     return float(state["marginSummary"]["accountValue"])
+
+
+# =============================
+def cancel_pending():
+    global current_order_id, pending_order
+
+    if current_order_id:
+        try:
+            exchange.cancel(SYMBOL, current_order_id)
+            print("LIMIT CANCELLED")
+        except Exception as e:
+            print("Cancel error:", e)
+
+    current_order_id = None
+    pending_order = False
 
 
 # =============================
@@ -70,11 +86,11 @@ def set_take_profit(signal):
 # =============================
 def monitor_fill(signal):
 
-    global current_position, pending_order
+    global current_position, pending_order, current_order_id
 
-    start_time = time.time()
+    start = time.time()
 
-    while time.time() - start_time < ORDER_TIMEOUT:
+    while time.time() - start < ORDER_TIMEOUT:
 
         state = exchange.info.user_state(account.address)
         positions = state["assetPositions"]
@@ -83,20 +99,20 @@ def monitor_fill(signal):
             print("POSITION FILLED")
             current_position = signal
             pending_order = False
+            current_order_id = None
             set_take_profit(signal)
             return
 
         time.sleep(2)
 
-    print("ORDER TIMEOUT → CANCEL")
-    exchange.cancel_all(SYMBOL)
-    pending_order = False
+    print("ORDER TIMEOUT")
+    cancel_pending()
 
 
 # =============================
 def open_position(signal):
 
-    global pending_order
+    global pending_order, current_order_id
 
     if pending_order:
         print("Order already pending")
@@ -118,7 +134,7 @@ def open_position(signal):
 
     print("LIMIT ORDER:", signal, limit_price)
 
-    exchange.order(
+    order = exchange.order(
         SYMBOL,
         is_buy,
         btc_size,
@@ -126,6 +142,8 @@ def open_position(signal):
         {"limit": {"tif": "Gtc"}}
     )
 
+    # ✅ ORDER ID AL
+    current_order_id = order["response"]["data"]["statuses"][0]["resting"]["oid"]
     pending_order = True
 
     threading.Thread(
@@ -142,16 +160,16 @@ def close_position():
     if current_position is None:
         return
 
-    print("Closing position")
     exchange.market_close(SYMBOL)
     current_position = None
+    print("POSITION CLOSED")
 
 
 # =============================
 @app.post("/webhook")
 async def webhook(request: Request):
 
-    global current_position, pending_order
+    global current_position
 
     body = await request.json()
     signal = body.get("signal")
@@ -161,13 +179,10 @@ async def webhook(request: Request):
     if signal not in ["BUY", "SELL"]:
         return {"status": "ignored"}
 
-    # ✅ BEKLEYEN LIMIT VARSA İPTAL
-    if pending_order:
-        print("Cancel pending limit")
-        exchange.cancel_all(SYMBOL)
-        pending_order = False
+    # ✅ eski limit iptal
+    cancel_pending()
 
-    # ✅ TERS POZİSYON KAPAT
+    # ✅ ters pozisyon kapat
     if current_position and current_position != signal:
         close_position()
         time.sleep(1)
