@@ -1,7 +1,5 @@
 import os
-import time
 import threading
-import requests
 from fastapi import FastAPI, Request
 from eth_account import Account
 from hyperliquid.exchange import Exchange
@@ -12,13 +10,17 @@ app = FastAPI()
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "BTC"
 POSITION_PERCENT = 0.9
-RANGE_TP = 0.002
+
+TP1_PERCENT = 0.50
+TP2_PERCENT = 0.30
+TP3_PERCENT = 0.20
 # ===========================================
 
 account = Account.from_key(PRIVATE_KEY)
 exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
 
-current_position = None
+current_side = None
+current_size = 0
 
 
 # ===========================================
@@ -28,140 +30,106 @@ def get_account_value():
 
 
 # ===========================================
-def get_rsi():
-    try:
-        data = requests.get(
-            "https://api.binance.com/api/v3/klines",
-            params={"symbol": "BTCUSDT", "interval": "3m", "limit": 100},
-            timeout=2
-        ).json()
+def open_position(side):
 
-        closes = [float(c[4]) for c in data]
+    global current_side, current_size
 
-        gains, losses = [], []
-
-        for i in range(1, 15):
-            diff = closes[-i] - closes[-i - 1]
-            if diff >= 0:
-                gains.append(diff)
-            else:
-                losses.append(abs(diff))
-
-        avg_gain = sum(gains)/14 if gains else 0.0001
-        avg_loss = sum(losses)/14 if losses else 0.0001
-
-        rs = avg_gain / avg_loss
-        rsi = 100 - (100/(1+rs))
-
-        print("RSI:", rsi)
-        return rsi
-
-    except:
-        return 50
-
-
-# ===========================================
-def close_position():
-    global current_position
-
-    if current_position is None:
-        return
-
-    print("CLOSE POSITION")
-    exchange.market_close(SYMBOL)
-    current_position = None
-
-
-# ===========================================
-def monitor_range_tp(entry_price, signal):
-
-    global current_position
-
-    while current_position == signal:
-
-        mids = exchange.info.all_mids()
-        price = float(mids["BTC"])
-
-        pnl = (
-            (price - entry_price) / entry_price
-            if signal == "BUY"
-            else (entry_price - price) / entry_price
-        )
-
-        if pnl >= RANGE_TP:
-            print("RANGE TP HIT")
-            close_position()
-            return
-
-        time.sleep(2)
-
-
-# ===========================================
-def range_mode_check(entry_price, signal):
-
-    rsi = get_rsi()
-
-    if 45 <= rsi <= 55:
-        print("RANGE MODE ACTIVE")
-        monitor_range_tp(entry_price, signal)
-
-
-# ===========================================
-def open_position(signal):
-
-    global current_position
-
-    account_value = get_account_value()
-    usd_size = account_value * POSITION_PERCENT
+    value = get_account_value()
 
     mids = exchange.info.all_mids()
-    btc_price = float(mids["BTC"])
-    btc_size = round(usd_size / btc_price, 5)
+    price = float(mids["BTC"])
 
-    is_buy = signal == "BUY"
+    usd_size = value * POSITION_PERCENT
+    size = round(usd_size / price, 5)
 
-    print("OPEN:", signal)
+    print("OPEN:", side, size)
 
-    exchange.market_open(SYMBOL, is_buy, btc_size)
+    exchange.market_open(
+        SYMBOL,
+        side == "BUY",
+        size
+    )
 
-    current_position = signal
-
-    threading.Thread(
-        target=range_mode_check,
-        args=(btc_price, signal),
-        daemon=True
-    ).start()
+    current_side = side
+    current_size = size
 
 
 # ===========================================
-def handle_signal(message):
+def close_all():
 
-    global current_position
+    global current_side, current_size
 
-    message = message.strip().upper()
+    if current_side:
+        print("FULL CLOSE")
+        exchange.market_close(SYMBOL)
 
-    print("SIGNAL:", message)
+    current_side = None
+    current_size = 0
 
-    if message == "LE":
-        signal = "BUY"
 
-    elif message == "SE":
-        signal = "SELL"
+# ===========================================
+def partial_close(percent):
 
-    elif message in ["LX", "SX"]:
-        close_position()
-        return
-    else:
-        return
+    global current_size, current_side
 
-    if current_position and current_position != signal:
-        close_position()
-        time.sleep(1)
-
-    if current_position == signal:
+    if current_size <= 0:
         return
 
-    open_position(signal)
+    size = round(current_size * percent, 5)
+
+    print("PARTIAL CLOSE:", size)
+
+    exchange.market_open(
+        SYMBOL,
+        current_side != "BUY",
+        size
+    )
+
+    current_size -= size
+
+
+# ===========================================
+def handle_signal(msg):
+
+    global current_side
+
+    msg = msg.strip().upper()
+    print("SIGNAL:", msg)
+
+    # ===== ENTRY =====
+    if msg == "LE":
+
+        if current_side == "SELL":
+            close_all()
+
+        if current_side != "BUY":
+            open_position("BUY")
+
+    elif msg == "SE":
+
+        if current_side == "BUY":
+            close_all()
+
+        if current_side != "SELL":
+            open_position("SELL")
+
+    # ===== TAKE PROFITS =====
+    elif msg == "LXTP1" or msg == "SXTP1":
+        partial_close(TP1_PERCENT)
+
+    elif msg == "LXTP2" or msg == "SXTP2":
+        partial_close(TP2_PERCENT)
+
+    elif msg == "LXTP3" or msg == "SXTP3":
+        partial_close(TP3_PERCENT)
+
+    # ===== STOP LOSS =====
+    elif msg == "SL":
+        close_all()
+
+    # ===== MANUAL EXIT =====
+    elif msg in ["LX", "SX"]:
+        close_all()
 
 
 # ===========================================
@@ -170,9 +138,6 @@ async def webhook(request: Request):
 
     body = await request.body()
     message = body.decode()
-
-    if not message.strip():
-        return {"status": "empty"}
 
     threading.Thread(
         target=handle_signal,
