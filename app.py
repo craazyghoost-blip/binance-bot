@@ -12,7 +12,7 @@ app = FastAPI()
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "BTC"
 POSITION_PERCENT = 0.9
-RANGE_TP = 0.002   # %0.20
+RANGE_TP = 0.002
 # ==================
 
 account = Account.from_key(PRIVATE_KEY)
@@ -28,7 +28,6 @@ def get_account_value():
 
 
 # =============================
-# RSI
 def get_rsi():
 
     data = requests.get(
@@ -112,7 +111,6 @@ def open_position(signal):
 
     current_position = signal
 
-    # RANGE MODE
     rsi = get_rsi()
 
     if 45 <= rsi <= 55:
@@ -126,17 +124,17 @@ def open_position(signal):
 
 
 # =============================
+# ✅ FIXED WEBHOOK (JSON ERROR ÇÖZÜLDÜ)
 @app.post("/webhook")
 async def webhook(request: Request):
 
     global current_position
 
-    body = await request.json()
-    message = str(body).upper()
+    body = await request.body()
+    message = body.decode().upper()
 
     print("WEBHOOK:", message)
 
-    # ===== TRADINGVIEW MAP =====
     if "LONG ENTRY" in message:
         signal = "BUY"
 
@@ -149,14 +147,11 @@ async def webhook(request: Request):
 
     else:
         return {"status": "ignored"}
-    # ===========================
 
-    # ters pozisyon varsa kapat
     if current_position and current_position != signal:
         close_position()
         time.sleep(2)
 
-    # aynı pozisyon tekrar açma
     if current_position == signal:
         return {"status": "same_position"}
 
