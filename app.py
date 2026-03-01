@@ -1,6 +1,7 @@
 import os
 import time
 import threading
+import requests
 from fastapi import FastAPI, Request
 from eth_account import Account
 from hyperliquid.exchange import Exchange
@@ -16,7 +17,8 @@ TP1_PERCENT = 0.50
 TP2_PERCENT = 0.30
 TP3_PERCENT = 0.20
 
-SIGNAL_COOLDOWN = 3  # saniye
+SIGNAL_COOLDOWN = 3
+SERVICE_URL = "https://binance-bot-nyjq.onrender.com"
 # ===========================================
 
 account = Account.from_key(PRIVATE_KEY)
@@ -25,7 +27,7 @@ exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
 current_side = None
 current_size = 0
 
-last_signal = None
+last_signal = ""
 last_signal_time = 0
 
 
@@ -48,7 +50,7 @@ def open_position(side):
     usd = value * POSITION_PERCENT
     size = round(usd / price, 5)
 
-    print("OPEN:", side)
+    print("OPEN:", side, size)
 
     exchange.market_open(
         SYMBOL,
@@ -83,7 +85,7 @@ def partial_close(percent):
 
     size = round(current_size * percent, 5)
 
-    print("TP CLOSE:", size)
+    print("PARTIAL CLOSE:", size)
 
     exchange.market_open(
         SYMBOL,
@@ -103,7 +105,7 @@ def handle_signal(msg):
     now = time.time()
     msg = msg.strip().upper()
 
-    # ===== SPAM LOCK =====
+    # ===== SPAM PROTECTION =====
     if msg == last_signal and now - last_signal_time < SIGNAL_COOLDOWN:
         print("SPAM BLOCKED:", msg)
         return
@@ -140,7 +142,7 @@ def handle_signal(msg):
     elif msg in ["LXTP3", "SXTP3"]:
         partial_close(TP3_PERCENT)
 
-    # ===== STOP / EXIT =====
+    # ===== STOP LOSS / EXIT =====
     elif msg in ["LX", "SX", "SL"]:
         close_all()
 
@@ -164,6 +166,26 @@ async def webhook(request: Request):
 @app.get("/")
 def root():
     return {"status": "alive"}
+
+
+# ===========================================
+# ✅ RENDER SLEEP FIX
+def keep_alive():
+
+    while True:
+        try:
+            requests.get(SERVICE_URL)
+            print("KEEP ALIVE")
+        except:
+            pass
+
+        time.sleep(300)
+
+
+threading.Thread(
+    target=keep_alive,
+    daemon=True
+).start()
 
 
 # ===========================================
