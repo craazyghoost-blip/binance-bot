@@ -78,10 +78,11 @@ def monitor_range_tp(entry_price, signal):
         mids = exchange.info.all_mids()
         price = float(mids["BTC"])
 
-        if signal == "BUY":
-            pnl = (price - entry_price) / entry_price
-        else:
-            pnl = (entry_price - price) / entry_price
+        pnl = (
+            (price - entry_price) / entry_price
+            if signal == "BUY"
+            else (entry_price - price) / entry_price
+        )
 
         if pnl >= RANGE_TP:
             print("RANGE TP HIT")
@@ -103,7 +104,7 @@ def open_position(signal):
     btc_price = float(mids["BTC"])
     btc_size = round(usd_size / btc_price, 5)
 
-    is_buy = True if signal == "BUY" else False
+    is_buy = signal == "BUY"
 
     print("OPEN:", signal)
 
@@ -123,17 +124,11 @@ def open_position(signal):
         ).start()
 
 
-# =============================
-# ✅ FIXED WEBHOOK (JSON ERROR ÇÖZÜLDÜ)
-@app.post("/webhook")
-async def webhook(request: Request):
+# =====================================================
+# ✅ NEW BACKGROUND SIGNAL HANDLER (ENJEKTE)
+def handle_signal(message):
 
     global current_position
-
-    body = await request.body()
-    message = body.decode().upper()
-
-    print("WEBHOOK:", message)
 
     if "LONG ENTRY" in message:
         signal = "BUY"
@@ -143,20 +138,41 @@ async def webhook(request: Request):
 
     elif "LONG EXIT" in message or "SHORT EXIT" in message:
         close_position()
-        return {"status": "closed"}
-
+        return
     else:
-        return {"status": "ignored"}
+        return
 
     if current_position and current_position != signal:
         close_position()
         time.sleep(2)
 
     if current_position == signal:
-        return {"status": "same_position"}
+        return
 
     open_position(signal)
 
+
+# =====================================================
+# ✅ FIXED WEBHOOK (TIMEOUT ÇÖZÜLDÜ)
+@app.post("/webhook")
+async def webhook(request: Request):
+
+    body = await request.body()
+    message = body.decode().upper()
+
+    print("WEBHOOK:", message)
+
+    if not message.strip():
+        return {"status": "empty"}
+
+    # işlem arkada çalışır
+    threading.Thread(
+        target=handle_signal,
+        args=(message,),
+        daemon=True
+    ).start()
+
+    # TradingView instant cevap
     return {"status": "ok"}
 
 
