@@ -8,12 +8,12 @@ from hyperliquid.exchange import Exchange
 
 app = FastAPI()
 
-# ===== CONFIG =====
+# ================= CONFIG =================
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "BTC"
 POSITION_PERCENT = 0.9
 RANGE_TP = 0.002
-# ==================
+# ===========================================
 
 account = Account.from_key(PRIVATE_KEY)
 exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
@@ -21,15 +21,14 @@ exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
 current_position = None
 
 
-# =============================
+# ===========================================
 def get_account_value():
     state = exchange.info.user_state(account.address)
     return float(state["marginSummary"]["accountValue"])
 
 
-# =============================
+# ===========================================
 def get_rsi():
-
     try:
         data = requests.get(
             "https://api.binance.com/api/v3/klines",
@@ -42,7 +41,7 @@ def get_rsi():
         gains, losses = [], []
 
         for i in range(1, 15):
-            diff = closes[-i] - closes[-i-1]
+            diff = closes[-i] - closes[-i - 1]
             if diff >= 0:
                 gains.append(diff)
             else:
@@ -58,23 +57,22 @@ def get_rsi():
         return rsi
 
     except:
-        print("RSI FAILED")
         return 50
 
 
-# =============================
+# ===========================================
 def close_position():
     global current_position
 
     if current_position is None:
         return
 
-    print("CLOSING POSITION")
+    print("CLOSE POSITION")
     exchange.market_close(SYMBOL)
     current_position = None
 
 
-# =============================
+# ===========================================
 def monitor_range_tp(entry_price, signal):
 
     global current_position
@@ -98,8 +96,7 @@ def monitor_range_tp(entry_price, signal):
         time.sleep(2)
 
 
-# =============================
-# ✅ RSI THREAD (BLOCKING FIX)
+# ===========================================
 def range_mode_check(entry_price, signal):
 
     rsi = get_rsi()
@@ -109,7 +106,7 @@ def range_mode_check(entry_price, signal):
         monitor_range_tp(entry_price, signal)
 
 
-# =============================
+# ===========================================
 def open_position(signal):
 
     global current_position
@@ -129,7 +126,6 @@ def open_position(signal):
 
     current_position = signal
 
-    # ✅ RSI artık background
     threading.Thread(
         target=range_mode_check,
         args=(btc_price, signal),
@@ -137,19 +133,22 @@ def open_position(signal):
     ).start()
 
 
-# =============================
-# ✅ SIGNAL HANDLER THREAD
+# ===========================================
 def handle_signal(message):
 
     global current_position
 
-    if "LONG ENTRY" in message:
+    message = message.strip().upper()
+
+    print("SIGNAL:", message)
+
+    if message == "LE":
         signal = "BUY"
 
-    elif "SHORT ENTRY" in message:
+    elif message == "SE":
         signal = "SELL"
 
-    elif "LONG EXIT" in message or "SHORT EXIT" in message:
+    elif message in ["LX", "SX"]:
         close_position()
         return
     else:
@@ -165,15 +164,12 @@ def handle_signal(message):
     open_position(signal)
 
 
-# =============================
-# ✅ ULTRA FAST WEBHOOK
+# ===========================================
 @app.post("/webhook")
 async def webhook(request: Request):
 
     body = await request.body()
-    message = body.decode().upper()
-
-    print("WEBHOOK:", message)
+    message = body.decode()
 
     if not message.strip():
         return {"status": "empty"}
@@ -192,7 +188,7 @@ def root():
     return {"status": "alive"}
 
 
-# =============================
+# ===========================================
 import uvicorn
 
 if __name__ == "__main__":
