@@ -1,4 +1,5 @@
 import os
+import time
 import threading
 from fastapi import FastAPI, Request
 from eth_account import Account
@@ -14,6 +15,8 @@ POSITION_PERCENT = 0.9
 TP1_PERCENT = 0.50
 TP2_PERCENT = 0.30
 TP3_PERCENT = 0.20
+
+SIGNAL_COOLDOWN = 3  # saniye
 # ===========================================
 
 account = Account.from_key(PRIVATE_KEY)
@@ -21,6 +24,9 @@ exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
 
 current_side = None
 current_size = 0
+
+last_signal = None
+last_signal_time = 0
 
 
 # ===========================================
@@ -39,10 +45,10 @@ def open_position(side):
     mids = exchange.info.all_mids()
     price = float(mids["BTC"])
 
-    usd_size = value * POSITION_PERCENT
-    size = round(usd_size / price, 5)
+    usd = value * POSITION_PERCENT
+    size = round(usd / price, 5)
 
-    print("OPEN:", side, size)
+    print("OPEN:", side)
 
     exchange.market_open(
         SYMBOL,
@@ -77,7 +83,7 @@ def partial_close(percent):
 
     size = round(current_size * percent, 5)
 
-    print("PARTIAL CLOSE:", size)
+    print("TP CLOSE:", size)
 
     exchange.market_open(
         SYMBOL,
@@ -91,44 +97,51 @@ def partial_close(percent):
 # ===========================================
 def handle_signal(msg):
 
+    global last_signal, last_signal_time
     global current_side
 
+    now = time.time()
     msg = msg.strip().upper()
+
+    # ===== SPAM LOCK =====
+    if msg == last_signal and now - last_signal_time < SIGNAL_COOLDOWN:
+        print("SPAM BLOCKED:", msg)
+        return
+
+    last_signal = msg
+    last_signal_time = now
+
     print("SIGNAL:", msg)
 
     # ===== ENTRY =====
     if msg == "LE":
 
-        if current_side == "SELL":
-            close_all()
+        if current_side == "BUY":
+            return
 
-        if current_side != "BUY":
-            open_position("BUY")
+        close_all()
+        open_position("BUY")
 
     elif msg == "SE":
 
-        if current_side == "BUY":
-            close_all()
+        if current_side == "SELL":
+            return
 
-        if current_side != "SELL":
-            open_position("SELL")
+        close_all()
+        open_position("SELL")
 
     # ===== TAKE PROFITS =====
-    elif msg == "LXTP1" or msg == "SXTP1":
+    elif msg in ["LXTP1", "SXTP1"]:
         partial_close(TP1_PERCENT)
 
-    elif msg == "LXTP2" or msg == "SXTP2":
+    elif msg in ["LXTP2", "SXTP2"]:
         partial_close(TP2_PERCENT)
 
-    elif msg == "LXTP3" or msg == "SXTP3":
+    elif msg in ["LXTP3", "SXTP3"]:
         partial_close(TP3_PERCENT)
 
-    # ===== STOP LOSS =====
-    elif msg == "SL":
-        close_all()
-
-    # ===== MANUAL EXIT =====
-    elif msg in ["LX", "SX"]:
+    # ===== STOP / EXIT =====
+    elif msg in ["LX", "SX", "SL"]:
         close_all()
 
 
