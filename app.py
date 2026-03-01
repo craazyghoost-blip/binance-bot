@@ -28,7 +28,7 @@ def get_account_value():
 
 
 # =============================
-# RSI CALC
+# RSI
 def get_rsi():
 
     data = requests.get(
@@ -64,13 +64,12 @@ def close_position():
     if current_position is None:
         return
 
-    print("Closing position")
+    print("CLOSING POSITION")
     exchange.market_close(SYMBOL)
     current_position = None
 
 
 # =============================
-# RANGE TP MONITOR
 def monitor_range_tp(entry_price, signal):
 
     global current_position
@@ -107,24 +106,21 @@ def open_position(signal):
 
     is_buy = True if signal == "BUY" else False
 
-    print("MARKET ENTRY:", signal)
+    print("OPEN:", signal)
 
     exchange.market_open(SYMBOL, is_buy, btc_size)
 
     current_position = signal
 
-    # ===== RSI MODE =====
+    # RANGE MODE
     rsi = get_rsi()
 
-    # YATAY MARKET
     if 45 <= rsi <= 55:
         print("RANGE MODE ACTIVE")
 
-        entry_price = btc_price
-
         threading.Thread(
             target=monitor_range_tp,
-            args=(entry_price, signal),
+            args=(btc_price, signal),
             daemon=True
         ).start()
 
@@ -136,17 +132,31 @@ async def webhook(request: Request):
     global current_position
 
     body = await request.json()
-    signal = body.get("signal", "").upper()
+    message = str(body).upper()
 
-    print("SIGNAL:", signal)
+    print("WEBHOOK:", message)
 
-    if signal not in ["BUY", "SELL"]:
+    # ===== TRADINGVIEW MAP =====
+    if "LONG ENTRY" in message:
+        signal = "BUY"
+
+    elif "SHORT ENTRY" in message:
+        signal = "SELL"
+
+    elif "LONG EXIT" in message or "SHORT EXIT" in message:
+        close_position()
+        return {"status": "closed"}
+
+    else:
         return {"status": "ignored"}
+    # ===========================
 
+    # ters pozisyon varsa kapat
     if current_position and current_position != signal:
         close_position()
         time.sleep(2)
 
+    # aynı pozisyon tekrar açma
     if current_position == signal:
         return {"status": "same_position"}
 
@@ -159,8 +169,9 @@ async def webhook(request: Request):
 def root():
     return {"status": "alive"}
 
+
+# =============================
 import uvicorn
-import os
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
