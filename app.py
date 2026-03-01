@@ -30,30 +30,36 @@ def get_account_value():
 # =============================
 def get_rsi():
 
-    data = requests.get(
-        "https://api.binance.com/api/v3/klines",
-        params={"symbol": "BTCUSDT", "interval": "3m", "limit": 100}
-    ).json()
+    try:
+        data = requests.get(
+            "https://api.binance.com/api/v3/klines",
+            params={"symbol": "BTCUSDT", "interval": "3m", "limit": 100},
+            timeout=2
+        ).json()
 
-    closes = [float(c[4]) for c in data]
+        closes = [float(c[4]) for c in data]
 
-    gains, losses = [], []
+        gains, losses = [], []
 
-    for i in range(1, 15):
-        diff = closes[-i] - closes[-i-1]
-        if diff >= 0:
-            gains.append(diff)
-        else:
-            losses.append(abs(diff))
+        for i in range(1, 15):
+            diff = closes[-i] - closes[-i-1]
+            if diff >= 0:
+                gains.append(diff)
+            else:
+                losses.append(abs(diff))
 
-    avg_gain = sum(gains)/14 if gains else 0.0001
-    avg_loss = sum(losses)/14 if losses else 0.0001
+        avg_gain = sum(gains)/14 if gains else 0.0001
+        avg_loss = sum(losses)/14 if losses else 0.0001
 
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100/(1+rs))
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100/(1+rs))
 
-    print("RSI:", rsi)
-    return rsi
+        print("RSI:", rsi)
+        return rsi
+
+    except:
+        print("RSI FAILED")
+        return 50
 
 
 # =============================
@@ -93,6 +99,17 @@ def monitor_range_tp(entry_price, signal):
 
 
 # =============================
+# ✅ RSI THREAD (BLOCKING FIX)
+def range_mode_check(entry_price, signal):
+
+    rsi = get_rsi()
+
+    if 45 <= rsi <= 55:
+        print("RANGE MODE ACTIVE")
+        monitor_range_tp(entry_price, signal)
+
+
+# =============================
 def open_position(signal):
 
     global current_position
@@ -112,20 +129,16 @@ def open_position(signal):
 
     current_position = signal
 
-    rsi = get_rsi()
-
-    if 45 <= rsi <= 55:
-        print("RANGE MODE ACTIVE")
-
-        threading.Thread(
-            target=monitor_range_tp,
-            args=(btc_price, signal),
-            daemon=True
-        ).start()
+    # ✅ RSI artık background
+    threading.Thread(
+        target=range_mode_check,
+        args=(btc_price, signal),
+        daemon=True
+    ).start()
 
 
-# =====================================================
-# ✅ NEW BACKGROUND SIGNAL HANDLER (ENJEKTE)
+# =============================
+# ✅ SIGNAL HANDLER THREAD
 def handle_signal(message):
 
     global current_position
@@ -144,7 +157,7 @@ def handle_signal(message):
 
     if current_position and current_position != signal:
         close_position()
-        time.sleep(2)
+        time.sleep(1)
 
     if current_position == signal:
         return
@@ -152,8 +165,8 @@ def handle_signal(message):
     open_position(signal)
 
 
-# =====================================================
-# ✅ FIXED WEBHOOK (TIMEOUT ÇÖZÜLDÜ)
+# =============================
+# ✅ ULTRA FAST WEBHOOK
 @app.post("/webhook")
 async def webhook(request: Request):
 
@@ -165,14 +178,12 @@ async def webhook(request: Request):
     if not message.strip():
         return {"status": "empty"}
 
-    # işlem arkada çalışır
     threading.Thread(
         target=handle_signal,
         args=(message,),
         daemon=True
     ).start()
 
-    # TradingView instant cevap
     return {"status": "ok"}
 
 
