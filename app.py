@@ -1,164 +1,90 @@
 import os
 import time
-import threading
-import requests
 from fastapi import FastAPI, Request
 from eth_account import Account
 from hyperliquid.exchange import Exchange
 
 app = FastAPI()
 
-# ================= CONFIG =================
+# ===== CONFIG =====
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "BTC"
 POSITION_PERCENT = 0.9
+# ==================
 
-TP1_PERCENT = 0.50
-TP2_PERCENT = 0.30
-TP3_PERCENT = 0.20
-
-SIGNAL_COOLDOWN = 3
-SERVICE_URL = "https://binance-bot-nyjq.onrender.com"
-# ===========================================
+if not PRIVATE_KEY:
+    raise Exception("PRIVATE_KEY not set")
 
 account = Account.from_key(PRIVATE_KEY)
+print("BOT ADDRESS:", account.address)
+
 exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
 
-current_side = None
-current_size = 0
-
-last_signal = ""
-last_signal_time = 0
+current_position = None
 
 
-# ===========================================
 def get_account_value():
     state = exchange.info.user_state(account.address)
     return float(state["marginSummary"]["accountValue"])
 
 
-# ===========================================
-def open_position(side):
+def open_position(signal):
+    global current_position
 
-    global current_side, current_size
+    account_value = get_account_value()
+    usd_size = account_value * POSITION_PERCENT
 
-    value = get_account_value()
+    if usd_size <= 0:
+        print("Balance is zero.")
+        return
 
     mids = exchange.info.all_mids()
-    price = float(mids["BTC"])
+    btc_price = float(mids["BTC"])
+    btc_size = round(usd_size / btc_price, 5)
 
-    usd = value * POSITION_PERCENT
-    size = round(usd / price, 5)
+    is_buy = True if signal == "BUY" else False
 
-    print("OPEN:", side, size)
+    print("Opening position:", signal)
+    print("BTC size:", btc_size)
 
-    exchange.market_open(
-        SYMBOL,
-        side == "BUY",
-        size
-    )
+    result = exchange.market_open(SYMBOL, is_buy, btc_size)
+    print("ORDER RESULT:", result)
 
-    current_side = side
-    current_size = size
+    current_position = signal
 
 
-# ===========================================
-def close_all():
+def close_position():
+    global current_position
 
-    global current_side, current_size
-
-    if current_side:
-        print("FULL CLOSE")
-        exchange.market_close(SYMBOL)
-
-    current_side = None
-    current_size = 0
-
-
-# ===========================================
-def partial_close(percent):
-
-    global current_size, current_side
-
-    if current_size <= 0:
+    if current_position is None:
         return
 
-    size = round(current_size * percent, 5)
+    print("Closing position")
+    exchange.market_close(SYMBOL)
 
-    print("PARTIAL CLOSE:", size)
-
-    exchange.market_open(
-        SYMBOL,
-        current_side != "BUY",
-        size
-    )
-
-    current_size -= size
+    current_position = None
 
 
-# ===========================================
-def handle_signal(msg):
-
-    global last_signal, last_signal_time
-    global current_side
-
-    now = time.time()
-    msg = msg.strip().upper()
-
-    # ===== SPAM PROTECTION =====
-    if msg == last_signal and now - last_signal_time < SIGNAL_COOLDOWN:
-        print("SPAM BLOCKED:", msg)
-        return
-
-    last_signal = msg
-    last_signal_time = now
-
-    print("SIGNAL:", msg)
-
-    # ===== ENTRY =====
-    if msg == "LE":
-
-        if current_side == "BUY":
-            return
-
-        close_all()
-        open_position("BUY")
-
-    elif msg == "SE":
-
-        if current_side == "SELL":
-            return
-
-        close_all()
-        open_position("SELL")
-
-    # ===== TAKE PROFITS =====
-    elif msg in ["LXTP1", "SXTP1"]:
-        partial_close(TP1_PERCENT)
-
-    elif msg in ["LXTP2", "SXTP2"]:
-        partial_close(TP2_PERCENT)
-
-    elif msg in ["LXTP3", "SXTP3"]:
-        partial_close(TP3_PERCENT)
-
-    # ===== STOP LOSS / EXIT =====
-    elif msg in ["LX", "SX", "SL"]:
-        close_all()
-
-
-# ===========================================
 @app.post("/webhook")
 async def webhook(request: Request):
+    global current_position
 
-    body = await request.body()
-    message = body.decode()
+    body = await request.json()
+    signal = body.get("signal")
 
-    threading.Thread(
-        target=handle_signal,
-        args=(message,),
-        daemon=True
-    ).start()
+    print("SIGNAL RECEIVED:", signal)
+
+    if signal not in ["BUY", "SELL"]:
+        return {"status": "ignored"}
+
+    if current_position == signal:
+        return {"status": "same_position"}
+
+    if current_position and current_position != signal:
+        close_position()
+        time.sleep(1)
+
+    open_position(signal)
 
     return {"status": "ok"}
 
@@ -166,31 +92,3 @@ async def webhook(request: Request):
 @app.get("/")
 def root():
     return {"status": "alive"}
-
-
-# ===========================================
-# ✅ RENDER SLEEP FIX
-def keep_alive():
-
-    while True:
-        try:
-            requests.get(SERVICE_URL)
-            print("KEEP ALIVE")
-        except:
-            pass
-
-        time.sleep(300)
-
-
-threading.Thread(
-    target=keep_alive,
-    daemon=True
-).start()
-
-
-# ===========================================
-import uvicorn
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
