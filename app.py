@@ -44,30 +44,35 @@ def open_position(signal):
     result = exchange.market_open(SYMBOL, is_buy, btc_size)
     print("ORDER RESULT:", result)
 
-    fill_price = float(result["response"]["data"]["statuses"][0]["filled"]["avgPx"])
-
-    time.sleep(1.5)
-
-    if signal == "BUY":
-        tp_price = round(fill_price * (1 + TP_PERCENT), 2)
-        exchange.order(
-            SYMBOL,
-            False,
-            btc_size,
-            tp_price,
-            {"limit": {"tif": "Gtc", "reduceOnly": True}}
+    try:
+        fill_price = float(
+            result["response"]["data"]["statuses"][0]["filled"]["avgPx"]
         )
+    except:
+        print("Fill price alınamadı")
+        return
+
+    time.sleep(1.2)
+
+    if is_buy:
+        tp_price = round(fill_price * (1 + TP_PERCENT), 2)
+        tp_is_buy = False
     else:
         tp_price = round(fill_price * (1 - TP_PERCENT), 2)
-        exchange.order(
-            SYMBOL,
-            True,
-            btc_size,
-            tp_price,
-            {"limit": {"tif": "Gtc", "reduceOnly": True}}
-        )
+        tp_is_buy = True
 
-    print("TP SET:", tp_price)
+    print("Setting TP:", tp_price)
+
+    tp_result = exchange.order(
+        coin=SYMBOL,
+        is_buy=tp_is_buy,
+        sz=btc_size,
+        limit_px=tp_price,
+        order_type={"limit": {"tif": "Gtc"}},
+        reduce_only=True
+    )
+
+    print("TP RESULT:", tp_result)
 
     current_position = signal
 
@@ -84,6 +89,7 @@ def close_position():
 
 @app.post("/webhook")
 async def webhook(request: Request):
+
     global current_position
 
     body = await request.json()
