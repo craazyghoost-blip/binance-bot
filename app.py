@@ -89,7 +89,7 @@ tp_result = exchange.order(
 
 print("TP RESULT:", tp_result)
 
-    current_position = signal
+current_position = signal
 
 
 def close_position():
