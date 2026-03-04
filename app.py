@@ -9,7 +9,8 @@ app = FastAPI()
 # ===== CONFIG =====
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "BTC"
-POSITION_PERCENT = 0.9
+POSITION_PERCENT = 0.99
+TP_PERCENT = 0.019
 # ==================
 
 if not PRIVATE_KEY:
@@ -49,6 +50,29 @@ def open_position(signal):
 
     result = exchange.market_open(SYMBOL, is_buy, btc_size)
     print("ORDER RESULT:", result)
+
+    # ===== TAKE PROFIT =====
+    if signal == "BUY":
+        tp_price = btc_price * (1 + TP_PERCENT)
+        exchange.order(
+            SYMBOL,
+            False,
+            btc_size,
+            round(tp_price, 2),
+            {"limit": {"tif": "Gtc", "reduceOnly": True}}
+        )
+
+    if signal == "SELL":
+        tp_price = btc_price * (1 - TP_PERCENT)
+        exchange.order(
+            SYMBOL,
+            True,
+            btc_size,
+            round(tp_price, 2),
+            {"limit": {"tif": "Gtc", "reduceOnly": True}}
+        )
+
+    print("TP SET:", tp_price)
 
     current_position = signal
 
