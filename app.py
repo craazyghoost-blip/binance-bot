@@ -51,25 +51,27 @@ def open_position(signal):
     result = exchange.market_open(SYMBOL, is_buy, btc_size)
     print("ORDER RESULT:", result)
 
-    # ===== TAKE PROFIT =====
+    # ===== TAKE PROFIT LIMIT =====
     if signal == "BUY":
-        tp_price = btc_price * (1 + TP_PERCENT)
+        tp_price = round(btc_price * (1 + TP_PERCENT), 2)
+
         exchange.order(
             SYMBOL,
             False,
             btc_size,
-            round(tp_price, 2),
-            {"limit": {"tif": "Gtc", "reduceOnly": True}}
+            tp_price,
+            {"limit": {"tif": "Gtc"}, "reduceOnly": True}
         )
 
     if signal == "SELL":
-        tp_price = btc_price * (1 - TP_PERCENT)
+        tp_price = round(btc_price * (1 - TP_PERCENT), 2)
+
         exchange.order(
             SYMBOL,
             True,
             btc_size,
-            round(tp_price, 2),
-            {"limit": {"tif": "Gtc", "reduceOnly": True}}
+            tp_price,
+            {"limit": {"tif": "Gtc"}, "reduceOnly": True}
         )
 
     print("TP SET:", tp_price)
