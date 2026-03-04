@@ -6,10 +6,12 @@ from hyperliquid.exchange import Exchange
 
 app = FastAPI()
 
+# ===== CONFIG =====
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "BTC"
-POSITION_PERCENT = 0.99
+POSITION_PERCENT = 0.97
 TP_PERCENT = 0.019
+# ==================
 
 if not PRIVATE_KEY:
     raise Exception("PRIVATE_KEY not set")
@@ -52,7 +54,7 @@ def open_position(signal):
         print("Fill price alınamadı")
         return
 
-    time.sleep(1.2)
+    time.sleep(1.5)
 
     if is_buy:
         tp_price = round(fill_price * (1 + TP_PERCENT), 2)
@@ -64,12 +66,11 @@ def open_position(signal):
     print("Setting TP:", tp_price)
 
     tp_result = exchange.order(
-        coin=SYMBOL,
-        is_buy=tp_is_buy,
-        sz=btc_size,
-        limit_px=tp_price,
-        order_type={"limit": {"tif": "Gtc"}},
-        reduce_only=True
+        SYMBOL,
+        tp_is_buy,
+        btc_size,
+        tp_price,
+        {"limit": {"tif": "Gtc", "reduceOnly": True}}
     )
 
     print("TP RESULT:", tp_result)
