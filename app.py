@@ -59,26 +59,35 @@ def open_position(signal):
         print("Fill price alınamadı")
         return
 
-    time.sleep(1.5)
+    time.sleep(2)
 
-    if is_buy:
-        tp_price = round(fill_price * (1 + TP_PERCENT), 2)
-        tp_is_buy = False
-    else:
-        tp_price = round(fill_price * (1 - TP_PERCENT), 2)
-        tp_is_buy = True
+state = exchange.info.user_state(account.address)
 
-    print("Setting TP:", tp_price)
+size = 0
+for p in state["assetPositions"]:
+    if p["position"]["coin"] == SYMBOL:
+        size = abs(float(p["position"]["szi"]))
 
-    tp_result = exchange.order(
-        SYMBOL,
-        tp_is_buy,
-        btc_size,
-        tp_price,
-        {"limit": {"tif": "Gtc", "reduceOnly": True}}
-    )
+if size == 0:
+    print("Position not found")
+    return
 
-    print("TP RESULT:", tp_result)
+if is_buy:
+    tp_price = round(fill_price * (1 + TP_PERCENT), 2)
+    tp_is_buy = False
+else:
+    tp_price = round(fill_price * (1 - TP_PERCENT), 2)
+    tp_is_buy = True
+
+tp_result = exchange.order(
+    SYMBOL,
+    tp_is_buy,
+    size,
+    tp_price,
+    {"limit": {"tif": "Gtc", "reduceOnly": True}}
+)
+
+print("TP RESULT:", tp_result)
 
     current_position = signal
 
