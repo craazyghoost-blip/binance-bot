@@ -19,13 +19,14 @@ if not PRIVATE_KEY:
 account = Account.from_key(PRIVATE_KEY)
 print("BOT ADDRESS:", account.address)
 
-exchange = Exchange(
-    wallet=account,
-    account_address=account.address,
-    base_url="https://api.hyperliquid.xyz"
-)
+exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
 
 current_position = None
+
+
+def format_price(raw_price: float) -> float:
+    sig_fig = float(f"{raw_price:.5g}")
+    return round(sig_fig)
 
 
 def get_account_value():
@@ -72,20 +73,23 @@ def open_position(signal):
         return
 
     if is_buy:
-        tp_price = round((fill_price * (1 + TP_PERCENT)) * 2) / 2
+        raw_tp = fill_price * (1 + TP_PERCENT)
         tp_is_buy = False
     else:
-        tp_price = round((fill_price * (1 - TP_PERCENT)) * 2) / 2
+        raw_tp = fill_price * (1 - TP_PERCENT)
         tp_is_buy = True
+
+    tp_price = format_price(raw_tp)
 
     tp_result = exchange.order(
         SYMBOL,
         tp_is_buy,
         size,
         tp_price,
-        {"limit": {"tif": "Alo"}, "reduceOnly": True}
+        {"limit": {"tif": "Gtc"}}
     )
 
+    print("TP SET:", tp_price)
     print("TP RESULT:", tp_result)
 
     current_position = signal
