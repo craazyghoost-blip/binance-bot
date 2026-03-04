@@ -19,7 +19,12 @@ if not PRIVATE_KEY:
 account = Account.from_key(PRIVATE_KEY)
 print("BOT ADDRESS:", account.address)
 
-exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
+# WALLET CONTEXT FIX
+exchange = Exchange(
+    wallet=account,
+    account_address=account.address,
+    base_url="https://api.hyperliquid.xyz"
+)
 
 current_position = None
 
