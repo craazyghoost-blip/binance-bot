@@ -66,7 +66,7 @@ def open_position(signal):
             False,
             btc_size,
             tp_price,
-            {"limit": {"tif": "Gtc"}, "reduceOnly": True}
+            {"limit": {"tif": "Gtc", "reduceOnly": True}}
         )
 
     if signal == "SELL":
