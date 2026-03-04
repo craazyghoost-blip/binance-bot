@@ -22,6 +22,7 @@ print("BOT ADDRESS:", account.address)
 exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
 
 current_position = None
+current_tp_id = None
 
 
 def format_price(raw_price: float) -> float:
@@ -34,17 +35,24 @@ def get_account_value():
     return float(state["marginSummary"]["accountValue"])
 
 
-# ===== TP İPTAL =====
-def cancel_tp_orders():
+def cancel_tp():
+    global current_tp_id
+
+    if current_tp_id is None:
+        return
+
     try:
-        exchange.cancel_all(SYMBOL)
-        print("OLD TP ORDERS CANCELLED")
+        exchange.cancel(SYMBOL, current_tp_id)
+        print("TP CANCELLED:", current_tp_id)
     except Exception as e:
-        print("Cancel TP error:", e)
+        print("TP cancel error:", e)
+
+    current_tp_id = None
 
 
 def open_position(signal):
     global current_position
+    global current_tp_id
 
     account_value = get_account_value()
     usd_size = account_value * POSITION_PERCENT
@@ -101,6 +109,12 @@ def open_position(signal):
     print("TP SET:", tp_price)
     print("TP RESULT:", tp_result)
 
+    try:
+        current_tp_id = tp_result["response"]["data"]["statuses"][0]["resting"]["oid"]
+        print("TP OID:", current_tp_id)
+    except:
+        print("TP oid alınamadı")
+
     current_position = signal
 
 
@@ -127,10 +141,8 @@ async def webhook(request: Request):
     if signal not in ["BUY", "SELL"]:
         return {"status": "ignored"}
 
-    # 🔴 Eski TP emirlerini iptal et
-    cancel_tp_orders()
+    cancel_tp()
 
-    # Pozisyon ters ise kapat
     if current_position and current_position != signal:
         close_position()
         time.sleep(1)
