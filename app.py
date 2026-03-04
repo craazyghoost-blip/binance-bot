@@ -60,7 +60,6 @@ def open_position(signal):
 
     time.sleep(2)
 
-    # gerçek pozisyon size çek
     state = exchange.info.user_state(account.address)
 
     size = 0
@@ -84,7 +83,7 @@ def open_position(signal):
         tp_is_buy,
         size,
         tp_price,
-        {"limit": {"tif": "Gtc", "reduceOnly": True}}
+        {"limit": {"tif": "Alo"}, "reduceOnly": True}
     )
 
     print("TP RESULT:", tp_result)
