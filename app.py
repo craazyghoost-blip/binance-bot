@@ -43,7 +43,7 @@ def open_position(signal):
     btc_price = float(mids["BTC"])
     btc_size = round(usd_size / btc_price, 5)
 
-    is_buy = True if signal == "BUY" else False
+    is_buy = signal == "BUY"
 
     print("Opening position:", signal)
     print("BTC size:", btc_size)
@@ -51,31 +51,31 @@ def open_position(signal):
     result = exchange.market_open(SYMBOL, is_buy, btc_size)
     print("ORDER RESULT:", result)
 
-    ffill_price = float(result["response"]["data"]["statuses"][0]["filled"]["avgPx"])
+    fill_price = float(result["response"]["data"]["statuses"][0]["filled"]["avgPx"])
 
-time.sleep(1.5)
+    time.sleep(1.5)
 
-if signal == "BUY":
-    tp_price = round(fill_price * (1 + TP_PERCENT), 2)
+    if signal == "BUY":
+        tp_price = round(fill_price * (1 + TP_PERCENT), 2)
 
-    exchange.order(
-        SYMBOL,
-        False,
-        btc_size,
-        tp_price,
-        {"limit": {"tif": "Gtc", "reduceOnly": True}}
-    )
+        exchange.order(
+            SYMBOL,
+            False,
+            btc_size,
+            tp_price,
+            {"limit": {"tif": "Gtc", "reduceOnly": True}}
+        )
 
-if signal == "SELL":
-    tp_price = round(fill_price * (1 - TP_PERCENT), 2)
+    else:
+        tp_price = round(fill_price * (1 - TP_PERCENT), 2)
 
-    exchange.order(
-        SYMBOL,
-        True,
-        btc_size,
-        tp_price,
-        {"limit": {"tif": "Gtc", "reduceOnly": True}}
-    )
+        exchange.order(
+            SYMBOL,
+            True,
+            btc_size,
+            tp_price,
+            {"limit": {"tif": "Gtc", "reduceOnly": True}}
+        )
 
     print("TP SET:", tp_price)
 
