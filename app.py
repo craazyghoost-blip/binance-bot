@@ -72,10 +72,10 @@ def open_position(signal):
         return
 
     if is_buy:
-        tp_price = round(fill_price * (1 + TP_PERCENT), 2)
+        tp_price = round((fill_price * (1 + TP_PERCENT)) * 2) / 2
         tp_is_buy = False
     else:
-        tp_price = round(fill_price * (1 - TP_PERCENT), 2)
+        tp_price = round((fill_price * (1 - TP_PERCENT)) * 2) / 2
         tp_is_buy = True
 
     tp_result = exchange.order(
