@@ -9,7 +9,7 @@ app = FastAPI()
 
 # ===== CONFIG =====
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
-SYMBOL = "BTC"
+SYMBOL = "SOL"
 POSITION_PERCENT = 0.97
 TP_PERCENT = 0.019
 # ==================
@@ -60,14 +60,14 @@ def open_position(signal):
     usd_size = account_value * POSITION_PERCENT
 
     mids = exchange.info.all_mids()
-    btc_price = float(mids["BTC"])
-    btc_size = round(usd_size / btc_price, 5)
+    sol_price = float(mids["SOL"])
+    sol_size = round(usd_size / sol_price, 3)
 
     is_buy = signal == "BUY"
 
     print("Opening position:", signal)
 
-    result = exchange.market_open(SYMBOL, is_buy, btc_size)
+    result = exchange.market_open(SYMBOL, is_buy, sol_size)
     print("ORDER RESULT:", result)
 
     try:
