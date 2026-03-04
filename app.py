@@ -60,8 +60,14 @@ def open_position(signal):
     usd_size = account_value * POSITION_PERCENT
 
     mids = exchange.info.all_mids()
-    sol_price = float(mids["SOL"])
-    sol_size = round(usd_size / sol_price, 3)
+    sol_price = float(mids[SYMBOL])
+
+    raw_size = usd_size / sol_price
+    sol_size = max(round(raw_size, 3), 0.001)
+
+    print("SOL PRICE:", sol_price)
+    print("RAW SIZE:", raw_size)
+    print("SOL SIZE:", sol_size)
 
     is_buy = signal == "BUY"
 
