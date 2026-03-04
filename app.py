@@ -19,7 +19,6 @@ if not PRIVATE_KEY:
 account = Account.from_key(PRIVATE_KEY)
 print("BOT ADDRESS:", account.address)
 
-# WALLET CONTEXT FIX
 exchange = Exchange(
     wallet=account,
     account_address=account.address,
@@ -61,35 +60,36 @@ def open_position(signal):
 
     time.sleep(2)
 
-state = exchange.info.user_state(account.address)
+    # gerçek pozisyon size çek
+    state = exchange.info.user_state(account.address)
 
-size = 0
-for p in state["assetPositions"]:
-    if p["position"]["coin"] == SYMBOL:
-        size = abs(float(p["position"]["szi"]))
+    size = 0
+    for p in state["assetPositions"]:
+        if p["position"]["coin"] == SYMBOL:
+            size = abs(float(p["position"]["szi"]))
 
-if size == 0:
-    print("Position not found")
-    return
+    if size == 0:
+        print("Position not found")
+        return
 
-if is_buy:
-    tp_price = round(fill_price * (1 + TP_PERCENT), 2)
-    tp_is_buy = False
-else:
-    tp_price = round(fill_price * (1 - TP_PERCENT), 2)
-    tp_is_buy = True
+    if is_buy:
+        tp_price = round(fill_price * (1 + TP_PERCENT), 2)
+        tp_is_buy = False
+    else:
+        tp_price = round(fill_price * (1 - TP_PERCENT), 2)
+        tp_is_buy = True
 
-tp_result = exchange.order(
-    SYMBOL,
-    tp_is_buy,
-    size,
-    tp_price,
-    {"limit": {"tif": "Gtc", "reduceOnly": True}}
-)
+    tp_result = exchange.order(
+        SYMBOL,
+        tp_is_buy,
+        size,
+        tp_price,
+        {"limit": {"tif": "Gtc", "reduceOnly": True}}
+    )
 
-print("TP RESULT:", tp_result)
+    print("TP RESULT:", tp_result)
 
-current_position = signal
+    current_position = signal
 
 
 def close_position():
