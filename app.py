@@ -53,8 +53,12 @@ def open_position(signal):
 
     fill_price = float(result["response"]["data"]["statuses"][0]["filled"]["avgPx"])
 
+    # pozisyonun oluşması için bekle
+    time.sleep(2)
+
     # ===== TP LIMIT =====
     if signal == "BUY":
+
         tp_price = round(fill_price * (1 + TP_PERCENT), 2)
 
         exchange.order(
@@ -66,6 +70,7 @@ def open_position(signal):
         )
 
     if signal == "SELL":
+
         tp_price = round(fill_price * (1 - TP_PERCENT), 2)
 
         exchange.order(
