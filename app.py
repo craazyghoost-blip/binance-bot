@@ -1,5 +1,6 @@
 import os
 import time
+import threading
 from fastapi import FastAPI, Request
 from eth_account import Account
 from hyperliquid.exchange import Exchange
@@ -128,10 +129,21 @@ def close_position():
     current_position = None
 
 
-@app.post("/webhook")
-async def webhook(request: Request):
+def process_signal(signal):
 
     global current_position
+
+    cancel_tp()
+
+    if current_position and current_position != signal:
+        close_position()
+        time.sleep(1)
+
+    open_position(signal)
+
+
+@app.post("/webhook")
+async def webhook(request: Request):
 
     body = await request.json()
     signal = body.get("signal")
@@ -141,13 +153,11 @@ async def webhook(request: Request):
     if signal not in ["BUY", "SELL"]:
         return {"status": "ignored"}
 
-    cancel_tp()
-
-    if current_position and current_position != signal:
-        close_position()
-        time.sleep(1)
-
-    open_position(signal)
+    threading.Thread(
+        target=process_signal,
+        args=(signal,),
+        daemon=True
+    ).start()
 
     return {"status": "ok"}
 
