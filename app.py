@@ -63,7 +63,7 @@ def open_position(signal):
     sol_price = float(mids[SYMBOL])
 
     raw_size = usd_size / sol_price
-    sol_size = max(round(raw_size, 3), 0.001)
+    sol_size = max(round(raw_size, 2), 0.01)
 
     print("SOL PRICE:", sol_price)
     print("RAW SIZE:", raw_size)
