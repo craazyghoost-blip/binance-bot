@@ -34,6 +34,15 @@ def get_account_value():
     return float(state["marginSummary"]["accountValue"])
 
 
+# ===== TP İPTAL =====
+def cancel_tp_orders():
+    try:
+        exchange.cancel_all(SYMBOL)
+        print("OLD TP ORDERS CANCELLED")
+    except Exception as e:
+        print("Cancel TP error:", e)
+
+
 def open_position(signal):
     global current_position
 
@@ -118,6 +127,10 @@ async def webhook(request: Request):
     if signal not in ["BUY", "SELL"]:
         return {"status": "ignored"}
 
+    # 🔴 Eski TP emirlerini iptal et
+    cancel_tp_orders()
+
+    # Pozisyon ters ise kapat
     if current_position and current_position != signal:
         close_position()
         time.sleep(1)
