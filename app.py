@@ -45,6 +45,7 @@ def cancel_tp():
     try:
         exchange.cancel(SYMBOL, current_tp_id)
         print("TP CANCELLED:", current_tp_id)
+        time.sleep(2)
     except Exception as e:
         print("TP cancel error:", e)
 
@@ -134,10 +135,11 @@ def process_signal(signal):
     global current_position
 
     cancel_tp()
+    time.sleep(2)
 
     if current_position and current_position != signal:
         close_position()
-        time.sleep(1)
+        time.sleep(2)
 
     open_position(signal)
 
