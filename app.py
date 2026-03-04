@@ -24,11 +24,6 @@ exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
 current_position = None
 
 
-def get_account_value():
-    state = exchange.info.user_state(account.address)
-    return float(state["marginSummary"]["accountValue"])
-
-
 def open_position(signal):
     global current_position
 
@@ -51,9 +46,14 @@ def open_position(signal):
     result = exchange.market_open(SYMBOL, is_buy, btc_size)
     print("ORDER RESULT:", result)
 
-    # ===== TAKE PROFIT LIMIT =====
+    fill_price = float(
+        result["response"]["data"]["statuses"][0]["filled"]["avgPx"]
+    )
+
+    # ===== TP =====
     if signal == "BUY":
-        tp_price = round(btc_price * (1 + TP_PERCENT), 2)
+
+        tp_price = round(fill_price * (1 + TP_PERCENT), 2)
 
         exchange.order(
             SYMBOL,
@@ -64,7 +64,8 @@ def open_position(signal):
         )
 
     if signal == "SELL":
-        tp_price = round(btc_price * (1 - TP_PERCENT), 2)
+
+        tp_price = round(fill_price * (1 - TP_PERCENT), 2)
 
         exchange.order(
             SYMBOL,
