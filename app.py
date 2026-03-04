@@ -6,12 +6,10 @@ from hyperliquid.exchange import Exchange
 
 app = FastAPI()
 
-# ===== CONFIG =====
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "BTC"
 POSITION_PERCENT = 0.99
 TP_PERCENT = 0.019
-# ==================
 
 if not PRIVATE_KEY:
     raise Exception("PRIVATE_KEY not set")
@@ -35,10 +33,6 @@ def open_position(signal):
     account_value = get_account_value()
     usd_size = account_value * POSITION_PERCENT
 
-    if usd_size <= 0:
-        print("Balance is zero.")
-        return
-
     mids = exchange.info.all_mids()
     btc_price = float(mids["BTC"])
     btc_size = round(usd_size / btc_price, 5)
@@ -46,7 +40,6 @@ def open_position(signal):
     is_buy = signal == "BUY"
 
     print("Opening position:", signal)
-    print("BTC size:", btc_size)
 
     result = exchange.market_open(SYMBOL, is_buy, btc_size)
     print("ORDER RESULT:", result)
@@ -57,7 +50,6 @@ def open_position(signal):
 
     if signal == "BUY":
         tp_price = round(fill_price * (1 + TP_PERCENT), 2)
-
         exchange.order(
             SYMBOL,
             False,
@@ -65,10 +57,8 @@ def open_position(signal):
             tp_price,
             {"limit": {"tif": "Gtc", "reduceOnly": True}}
         )
-
     else:
         tp_price = round(fill_price * (1 - TP_PERCENT), 2)
-
         exchange.order(
             SYMBOL,
             True,
@@ -88,9 +78,7 @@ def close_position():
     if current_position is None:
         return
 
-    print("Closing position")
     exchange.market_close(SYMBOL)
-
     current_position = None
 
 
@@ -105,9 +93,6 @@ async def webhook(request: Request):
 
     if signal not in ["BUY", "SELL"]:
         return {"status": "ignored"}
-
-    if current_position == signal:
-        return {"status": "same_position"}
 
     if current_position and current_position != signal:
         close_position()
