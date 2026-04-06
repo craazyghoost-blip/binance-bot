@@ -11,7 +11,7 @@ app = FastAPI()
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "SOL"
 POSITION_PERCENT = 0.97
-TP_PERCENT = 0.019
+TP_PERCENT = 0.003
 # ==================
 
 if not PRIVATE_KEY:
