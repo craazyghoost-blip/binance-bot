@@ -11,7 +11,8 @@ app = FastAPI()
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "SOL"
 POSITION_PERCENT = 0.97
-TP_PERCENT = 0.03
+TP_PERCENT = 0.003
+MIN_ORDER_USD = 10
 # ==================
 
 if not PRIVATE_KEY:
@@ -27,8 +28,7 @@ current_tp_id = None
 
 
 def format_price(raw_price: float) -> float:
-    sig_fig = float(f"{raw_price:.5g}")
-    return round(sig_fig)
+    return round(raw_price, 2)
 
 
 def get_account_value():
@@ -62,11 +62,16 @@ def open_position(signal):
     mids = exchange.info.all_mids()
     sol_price = float(mids[SYMBOL])
 
+    # minimum order fix
+    usd_size = max(usd_size, MIN_ORDER_USD)
+
     raw_size = usd_size / sol_price
-    sol_size = max(round(raw_size, 2), 0.01)
+    min_size = MIN_ORDER_USD / sol_price
+
+    sol_size = max(round(raw_size, 2), round(min_size, 2))
 
     print("SOL PRICE:", sol_price)
-    print("RAW SIZE:", raw_size)
+    print("USD SIZE:", usd_size)
     print("SOL SIZE:", sol_size)
 
     is_buy = signal == "BUY"
@@ -137,7 +142,6 @@ def close_position():
 
 
 def process_signal(signal):
-
     global current_position
 
     cancel_tp()
