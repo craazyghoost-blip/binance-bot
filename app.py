@@ -59,8 +59,9 @@ def get_indicators(symbol="SOL"):
         "vol_avg": volume.rolling(20).mean().iloc[-1]
     }
 
-# ===== FILTER =====
+# ===== FILTER (SCORING) =====
 def filter_signal(signal, d):
+
     price = d["price"]
     rsi = d["rsi"]
     macd = d["macd"]
@@ -71,37 +72,81 @@ def filter_signal(signal, d):
     volume = d["volume"]
     vol_avg = d["vol_avg"]
 
-    # GLOBAL
-    if adx < 23:
-        return False
+    score = 0
 
-    if atr < price * 0.0025:
-        return False
+    print("\n===== FILTER ANALYSIS =====")
 
-    if volume < vol_avg:
-        return False
+    # ADX
+    if adx > 20:
+        print(f"ADX: {adx} → +1")
+        score += 1
+    else:
+        print(f"ADX: {adx} → -1")
 
-    # LONG
+    # ATR
+    if atr > price * 0.002:
+        print(f"ATR: {atr} → +1")
+        score += 1
+    else:
+        print(f"ATR: {atr} → -1")
+
+    # VOLUME
+    if volume > vol_avg:
+        print(f"VOLUME: {volume} > {vol_avg} → +1")
+        score += 1
+    else:
+        print(f"VOLUME: {volume} < {vol_avg} → -1")
+
+    # ===== LONG =====
     if signal == "BUY":
-        if not (price > ema50 > ema200):
-            return False
-        if not (45 < rsi < 60):
-            return False
-        if macd < 0:
-            return False
-        return True
 
-    # SHORT
-    if signal == "SELL":
-        if not (price < ema50 < ema200):
-            return False
-        if not (40 < rsi < 55):
-            return False
+        if price > ema50:
+            print(f"EMA: price {price} > ema50 {ema50} → +1")
+            score += 1
+        else:
+            print(f"EMA: price {price} < ema50 {ema50} → -1")
+
         if macd > 0:
-            return False
-        return True
+            print(f"MACD: {macd} → +1")
+            score += 1
+        else:
+            print(f"MACD: {macd} → -1")
 
-    return False
+        if 40 < rsi < 65:
+            print(f"RSI: {rsi} → +1")
+            score += 1
+        else:
+            print(f"RSI: {rsi} → -1")
+
+    # ===== SHORT =====
+    if signal == "SELL":
+
+        if price < ema50:
+            print(f"EMA: price {price} < ema50 {ema50} → +1")
+            score += 1
+        else:
+            print(f"EMA: price {price} > ema50 {ema50} → -1")
+
+        if macd < 0:
+            print(f"MACD: {macd} → +1")
+            score += 1
+        else:
+            print(f"MACD: {macd} → -1")
+
+        if 35 < rsi < 60:
+            print(f"RSI: {rsi} → +1")
+            score += 1
+        else:
+            print(f"RSI: {rsi} → -1")
+
+    print(f"TOTAL SCORE: {score}")
+
+    if score >= 3:
+        print("✅ APPROVED\n")
+        return True
+    else:
+        print("❌ REJECTED\n")
+        return False
 
 # ===== CORE =====
 def format_price(raw_price: float) -> float:
@@ -146,16 +191,9 @@ def open_position(signal):
 
     sol_size = max(round(raw_size, 2), round(min_size, 2))
 
-    print("SOL PRICE:", sol_price)
-    print("USD SIZE:", usd_size)
-    print("SOL SIZE:", sol_size)
-
-    is_buy = signal == "BUY"
-
     print("Opening position:", signal)
 
-    result = exchange.market_open(SYMBOL, is_buy, sol_size)
-    print("ORDER RESULT:", result)
+    result = exchange.market_open(SYMBOL, signal == "BUY", sol_size)
 
     try:
         fill_price = float(
@@ -178,14 +216,12 @@ def open_position(signal):
         print("Position not found")
         return
 
-    if is_buy:
-        raw_tp = fill_price * (1 + TP_PERCENT)
+    if signal == "BUY":
+        tp_price = format_price(fill_price * (1 + TP_PERCENT))
         tp_is_buy = False
     else:
-        raw_tp = fill_price * (1 - TP_PERCENT)
+        tp_price = format_price(fill_price * (1 - TP_PERCENT))
         tp_is_buy = True
-
-    tp_price = format_price(raw_tp)
 
     tp_result = exchange.order(
         SYMBOL,
@@ -195,14 +231,10 @@ def open_position(signal):
         {"limit": {"tif": "Gtc"}}
     )
 
-    print("TP SET:", tp_price)
-    print("TP RESULT:", tp_result)
-
     try:
         current_tp_id = tp_result["response"]["data"]["statuses"][0]["resting"]["oid"]
-        print("TP OID:", current_tp_id)
     except:
-        print("TP oid alınamadı")
+        pass
 
     current_position = signal
 
@@ -222,22 +254,15 @@ def process_signal(signal):
     global current_position
 
     print("SIGNAL:", signal)
-    print("Checking filters...")
 
-    # aynı yön → tekrar açma
     if current_position == signal:
         print("Same direction → skip")
         return
 
     data = get_indicators(SYMBOL)
 
-    print("INDICATORS:", data)
-
     if not filter_signal(signal, data):
-        print("❌ FILTER REJECTED")
         return
-
-    print("✅ FILTER APPROVED")
 
     cancel_tp()
     time.sleep(2)
@@ -255,8 +280,6 @@ async def webhook(request: Request):
 
     body = await request.json()
     signal = body.get("signal")
-
-    print("SIGNAL RECEIVED:", signal)
 
     if signal not in ["BUY", "SELL"]:
         return {"status": "ignored"}
