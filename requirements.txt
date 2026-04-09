@@ -3,3 +3,6 @@ eth-account
 fastapi
 uvicorn
 gunicorn
+pandas
+ta
+requests
