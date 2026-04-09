@@ -33,9 +33,22 @@ current_tp_id = None
 # ===== INDICATORS =====
 def get_indicators(symbol="SOL"):
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval=1m&limit=150"
-    data = requests.get(url).json()
+    
+    try:
+        response = requests.get(url, timeout=5)
+        data = response.json()
 
-    df = pd.DataFrame(data)
+        # 🔥 KRİTİK KONTROL
+        if not isinstance(data, list):
+            print("❌ Binance veri hatası:", data)
+            return None
+
+        df = pd.DataFrame(data)
+
+    except Exception as e:
+        print("❌ Veri çekme hatası:", e)
+        return None
+
     df[1] = df[1].astype(float)
     df[2] = df[2].astype(float)
     df[3] = df[3].astype(float)
@@ -261,8 +274,12 @@ def process_signal(signal):
 
     data = get_indicators(SYMBOL)
 
-    if not filter_signal(signal, data):
-        return
+if data is None:
+    print("❌ Veri alınamadı → işlem iptal")
+    return
+
+if not filter_signal(signal, data):
+    return
 
     cancel_tp()
     time.sleep(2)
