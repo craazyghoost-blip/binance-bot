@@ -274,12 +274,12 @@ def process_signal(signal):
 
     data = get_indicators(SYMBOL)
 
-if data is None:
-    print("❌ Veri alınamadı → işlem iptal")
-    return
+    if data is None:
+        print("❌ Veri alınamadı → işlem iptal")
+        return
 
-if not filter_signal(signal, data):
-    return
+    if not filter_signal(signal, data):
+        return
 
     cancel_tp()
     time.sleep(2)
@@ -289,7 +289,6 @@ if not filter_signal(signal, data):
         time.sleep(2)
 
     open_position(signal)
-
 
 # ===== WEBHOOK =====
 @app.post("/webhook")
