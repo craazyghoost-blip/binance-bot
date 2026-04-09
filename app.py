@@ -32,46 +32,60 @@ current_tp_id = None
 
 # ===== INDICATORS (BYBIT) =====
 def get_indicators(symbol="SOL"):
-    try:
-        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}USDT&interval=1&limit=150"
-        res = requests.get(url, timeout=3).json()
+    url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}USDT&interval=1&limit=150"
 
-        if "result" not in res or "list" not in res["result"]:
-            print("❌ Bybit veri format hatası:", res)
-            return None
+    for i in range(3):  # 🔥 3 kez dene
+        try:
+            res = requests.get(url, timeout=3)
 
-        df = pd.DataFrame(res["result"]["list"])
+            if res.status_code != 200:
+                print("❌ HTTP hata:", res.status_code)
+                time.sleep(1)
+                continue
 
-        df[1] = df[1].astype(float)
-        df[2] = df[2].astype(float)
-        df[3] = df[3].astype(float)
-        df[4] = df[4].astype(float)
-        df[5] = df[5].astype(float)
+            data = res.json()
 
-        df = df[::-1]
+            if "result" not in data or "list" not in data["result"]:
+                print("❌ Veri format hatası:", data)
+                time.sleep(1)
+                continue
 
-        close = df[4]
-        high = df[2]
-        low = df[3]
-        volume = df[5]
+            df = pd.DataFrame(data["result"]["list"])
 
-        print("✅ Bybit veri OK")
+            df[1] = df[1].astype(float)
+            df[2] = df[2].astype(float)
+            df[3] = df[3].astype(float)
+            df[4] = df[4].astype(float)
+            df[5] = df[5].astype(float)
 
-        return {
-            "price": close.iloc[-1],
-            "rsi": ta.momentum.RSIIndicator(close).rsi().iloc[-1],
-            "macd": ta.trend.MACD(close).macd_diff().iloc[-1],
-            "adx": ta.trend.ADXIndicator(high, low, close).adx().iloc[-1],
-            "ema50": ta.trend.EMAIndicator(close, window=50).ema_indicator().iloc[-1],
-            "ema200": ta.trend.EMAIndicator(close, window=200).ema_indicator().iloc[-1],
-            "atr": ta.volatility.AverageTrueRange(high, low, close).average_true_range().iloc[-1],
-            "volume": volume.iloc[-1],
-            "vol_avg": volume.rolling(20).mean().iloc[-1]
-        }
+            df = df[::-1]
 
-    except Exception as e:
-        print("❌ Bybit veri hatası:", e)
-        return None
+            close = df[4]
+            high = df[2]
+            low = df[3]
+            volume = df[5]
+
+            print("✅ Bybit veri OK")
+
+            return {
+                "price": close.iloc[-1],
+                "rsi": ta.momentum.RSIIndicator(close).rsi().iloc[-1],
+                "macd": ta.trend.MACD(close).macd_diff().iloc[-1],
+                "adx": ta.trend.ADXIndicator(high, low, close).adx().iloc[-1],
+                "ema50": ta.trend.EMAIndicator(close, window=50).ema_indicator().iloc[-1],
+                "ema200": ta.trend.EMAIndicator(close, window=200).ema_indicator().iloc[-1],
+                "atr": ta.volatility.AverageTrueRange(high, low, close).average_true_range().iloc[-1],
+                "volume": volume.iloc[-1],
+                "vol_avg": volume.rolling(20).mean().iloc[-1]
+            }
+
+        except Exception as e:
+            print(f"❌ Deneme {i+1} başarısız:", e)
+            time.sleep(1)
+
+    # 🔥 3 deneme de başarısız
+    print("❌ Tüm denemeler başarısız → veri yok")
+    return None
 
 
 # ===== FILTER =====
