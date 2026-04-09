@@ -15,7 +15,7 @@ app = FastAPI()
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "SOL"
 POSITION_PERCENT = 0.97
-TP_PERCENT = 0.003
+TP_PERCENT = 0.0025
 MIN_ORDER_USD = 10
 # ==================
 
