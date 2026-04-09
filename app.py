@@ -1,6 +1,10 @@
 import os
 import time
 import threading
+import requests
+import pandas as pd
+import ta
+
 from fastapi import FastAPI, Request
 from eth_account import Account
 from hyperliquid.exchange import Exchange
@@ -26,7 +30,80 @@ exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
 current_position = None
 current_tp_id = None
 
+# ===== INDICATORS =====
+def get_indicators(symbol="SOL"):
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval=1m&limit=150"
+    data = requests.get(url).json()
 
+    df = pd.DataFrame(data)
+    df[1] = df[1].astype(float)
+    df[2] = df[2].astype(float)
+    df[3] = df[3].astype(float)
+    df[4] = df[4].astype(float)
+    df[5] = df[5].astype(float)
+
+    close = df[4]
+    high = df[2]
+    low = df[3]
+    volume = df[5]
+
+    return {
+        "price": close.iloc[-1],
+        "rsi": ta.momentum.RSIIndicator(close).rsi().iloc[-1],
+        "macd": ta.trend.MACD(close).macd_diff().iloc[-1],
+        "adx": ta.trend.ADXIndicator(high, low, close).adx().iloc[-1],
+        "ema50": ta.trend.EMAIndicator(close, window=50).ema_indicator().iloc[-1],
+        "ema200": ta.trend.EMAIndicator(close, window=200).ema_indicator().iloc[-1],
+        "atr": ta.volatility.AverageTrueRange(high, low, close).average_true_range().iloc[-1],
+        "volume": volume.iloc[-1],
+        "vol_avg": volume.rolling(20).mean().iloc[-1]
+    }
+
+# ===== FILTER =====
+def filter_signal(signal, d):
+    price = d["price"]
+    rsi = d["rsi"]
+    macd = d["macd"]
+    adx = d["adx"]
+    ema50 = d["ema50"]
+    ema200 = d["ema200"]
+    atr = d["atr"]
+    volume = d["volume"]
+    vol_avg = d["vol_avg"]
+
+    # GLOBAL
+    if adx < 23:
+        return False
+
+    if atr < price * 0.0025:
+        return False
+
+    if volume < vol_avg:
+        return False
+
+    # LONG
+    if signal == "BUY":
+        if not (price > ema50 > ema200):
+            return False
+        if not (45 < rsi < 60):
+            return False
+        if macd < 0:
+            return False
+        return True
+
+    # SHORT
+    if signal == "SELL":
+        if not (price < ema50 < ema200):
+            return False
+        if not (40 < rsi < 55):
+            return False
+        if macd > 0:
+            return False
+        return True
+
+    return False
+
+# ===== CORE =====
 def format_price(raw_price: float) -> float:
     return round(raw_price, 2)
 
@@ -62,7 +139,6 @@ def open_position(signal):
     mids = exchange.info.all_mids()
     sol_price = float(mids[SYMBOL])
 
-    # minimum order fix
     usd_size = max(usd_size, MIN_ORDER_USD)
 
     raw_size = usd_size / sol_price
@@ -141,8 +217,27 @@ def close_position():
     current_position = None
 
 
+# ===== SIGNAL PROCESS =====
 def process_signal(signal):
     global current_position
+
+    print("SIGNAL:", signal)
+    print("Checking filters...")
+
+    # aynı yön → tekrar açma
+    if current_position == signal:
+        print("Same direction → skip")
+        return
+
+    data = get_indicators(SYMBOL)
+
+    print("INDICATORS:", data)
+
+    if not filter_signal(signal, data):
+        print("❌ FILTER REJECTED")
+        return
+
+    print("✅ FILTER APPROVED")
 
     cancel_tp()
     time.sleep(2)
@@ -154,6 +249,7 @@ def process_signal(signal):
     open_position(signal)
 
 
+# ===== WEBHOOK =====
 @app.post("/webhook")
 async def webhook(request: Request):
 
