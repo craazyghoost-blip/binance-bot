@@ -29,8 +29,9 @@ current_tp_id = None
 current_sl_id = None
 
 
+# 🔥 ARTIK 4 DECIMAL
 def format_price(price):
-    return round(price, 2)
+    return float(f"{price:.4f}")
 
 
 def get_account_value():
@@ -71,7 +72,7 @@ def open_position(signal):
     mids = exchange.info.all_mids()
     price = float(mids[SYMBOL])
 
-    size = round(usd_size / price, 2)
+    size = round(usd_size / price, 3)
 
     is_buy = signal == "BUY"
 
@@ -90,7 +91,7 @@ def open_position(signal):
     # 🔥 MARKET OTURSUN
     time.sleep(2)
 
-    # gerçek size çek
+    # pozisyon size çek
     state = exchange.info.user_state(account.address)
     size = 0
     for p in state["assetPositions"]:
@@ -101,12 +102,18 @@ def open_position(signal):
         print("Pozisyon yok")
         return
 
+    current_price = float(exchange.info.all_mids()[SYMBOL])
+
     # ===== TP =====
     if is_buy:
         tp_price = format_price(fill_price * (1 + TP_PERCENT))
+        if tp_price <= current_price:
+            tp_price = format_price(current_price * 1.002)
         tp_side = False
     else:
         tp_price = format_price(fill_price * (1 - TP_PERCENT))
+        if tp_price >= current_price:
+            tp_price = format_price(current_price * 0.998)
         tp_side = True
 
     time.sleep(1)
@@ -128,15 +135,19 @@ def open_position(signal):
     except:
         print("TP hata")
 
-    # 🔥 TP ile SL aynı anda gitmesin
+    # 🔥 TP ile SL çakışmasın
     time.sleep(1.5)
 
     # ===== SL =====
     if is_buy:
         sl_price = format_price(fill_price * (1 - SL_PERCENT))
+        if sl_price >= current_price:
+            sl_price = format_price(current_price * 0.998)
         sl_side = False
     else:
         sl_price = format_price(fill_price * (1 + SL_PERCENT))
+        if sl_price <= current_price:
+            sl_price = format_price(current_price * 1.002)
         sl_side = True
 
     sl = exchange.order(
