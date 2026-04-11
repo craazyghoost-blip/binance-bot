@@ -11,8 +11,8 @@ app = FastAPI()
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "SOL"
 POSITION_PERCENT = 0.97
-TP_PERCENT = 0.0045   # %0.45
-SL_PERCENT = 0.01     # %1
+TP_PERCENT = 0.0045
+SL_PERCENT = 0.01
 MIN_ORDER_USD = 10
 # ==================
 
@@ -29,9 +29,8 @@ current_tp_id = None
 current_sl_id = None
 
 
-# 🔥 ARTIK 4 DECIMAL
 def format_price(price):
-    return float(f"{price:.4f}")
+    return float(f"{price:.3f}")
 
 
 def get_account_value():
@@ -44,10 +43,8 @@ def cancel_tp():
     if current_tp_id:
         try:
             exchange.cancel(SYMBOL, current_tp_id)
-            print("TP CANCELLED")
-            time.sleep(1)
-        except Exception as e:
-            print("TP cancel error:", e)
+        except:
+            pass
         current_tp_id = None
 
 
@@ -56,27 +53,26 @@ def cancel_sl():
     if current_sl_id:
         try:
             exchange.cancel(SYMBOL, current_sl_id)
-            print("SL CANCELLED")
-            time.sleep(1)
-        except Exception as e:
-            print("SL cancel error:", e)
+        except:
+            pass
         current_sl_id = None
 
 
 def open_position(signal):
     global current_position, current_tp_id, current_sl_id
 
+    print("Signal geldi, 3 sn bekleniyor...")
+    time.sleep(3)
+
     account_value = get_account_value()
     usd_size = max(account_value * POSITION_PERCENT, MIN_ORDER_USD)
 
-    mids = exchange.info.all_mids()
-    price = float(mids[SYMBOL])
-
+    price = float(exchange.info.all_mids()[SYMBOL])
     size = round(usd_size / price, 3)
 
     is_buy = signal == "BUY"
 
-    print("OPEN:", signal)
+    print("Pozisyon açılıyor:", signal)
 
     result = exchange.market_open(SYMBOL, is_buy, size)
 
@@ -88,8 +84,8 @@ def open_position(signal):
         print("Fill price yok")
         return
 
-    # 🔥 MARKET OTURSUN
-    time.sleep(2)
+    print("Pozisyon açıldı, 3 sn bekleniyor...")
+    time.sleep(3)
 
     # pozisyon size çek
     state = exchange.info.user_state(account.address)
@@ -102,68 +98,53 @@ def open_position(signal):
         print("Pozisyon yok")
         return
 
-    current_price = float(exchange.info.all_mids()[SYMBOL])
-
     # ===== TP =====
     if is_buy:
         tp_price = format_price(fill_price * (1 + TP_PERCENT))
-        if tp_price <= current_price:
-            tp_price = format_price(current_price * 1.002)
         tp_side = False
     else:
         tp_price = format_price(fill_price * (1 - TP_PERCENT))
-        if tp_price >= current_price:
-            tp_price = format_price(current_price * 0.998)
         tp_side = True
 
-    time.sleep(1)
+    print("TP için 3 sn bekleniyor...")
+    time.sleep(3)
 
     tp = exchange.order(
         SYMBOL,
         tp_side,
         size,
         tp_price,
-        {
-            "limit": {"tif": "Gtc"},
-            "reduceOnly": True
-        }
+        {"limit": {"tif": "Gtc"}, "reduceOnly": True}
     )
 
     try:
         current_tp_id = tp["response"]["data"]["statuses"][0]["resting"]["oid"]
-        print("TP SET:", tp_price)
+        print("TP koyuldu:", tp_price)
     except:
         print("TP hata")
-
-    # 🔥 TP ile SL çakışmasın
-    time.sleep(1.5)
 
     # ===== SL =====
     if is_buy:
         sl_price = format_price(fill_price * (1 - SL_PERCENT))
-        if sl_price >= current_price:
-            sl_price = format_price(current_price * 0.998)
         sl_side = False
     else:
         sl_price = format_price(fill_price * (1 + SL_PERCENT))
-        if sl_price <= current_price:
-            sl_price = format_price(current_price * 1.002)
         sl_side = True
+
+    print("SL için 3 sn bekleniyor...")
+    time.sleep(3)
 
     sl = exchange.order(
         SYMBOL,
         sl_side,
         size,
         sl_price,
-        {
-            "limit": {"tif": "Gtc"},
-            "reduceOnly": True
-        }
+        {"limit": {"tif": "Gtc"}, "reduceOnly": True}
     )
 
     try:
         current_sl_id = sl["response"]["data"]["statuses"][0]["resting"]["oid"]
-        print("SL SET:", sl_price)
+        print("SL koyuldu:", sl_price)
     except:
         print("SL hata")
 
@@ -185,7 +166,6 @@ def process_signal(signal):
 
     cancel_tp()
     cancel_sl()
-    time.sleep(1)
 
     if current_position and current_position != signal:
         close_position()
