@@ -11,8 +11,8 @@ app = FastAPI()
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "SOL"
 POSITION_PERCENT = 0.97
-TP_PERCENT = 0.0045
-SL_PERCENT = 0.01
+TP_PERCENT = 0.0045   # %0.45
+SL_PERCENT = 0.01     # %1
 MIN_ORDER_USD = 10
 # ==================
 
@@ -29,8 +29,8 @@ current_tp_id = None
 current_sl_id = None
 
 
-def format_price(raw_price: float) -> float:
-    return round(raw_price, 2)
+def format_price(price):
+    return round(price, 2)
 
 
 def get_account_value():
@@ -40,34 +40,26 @@ def get_account_value():
 
 def cancel_tp():
     global current_tp_id
-
-    if current_tp_id is None:
-        return
-
-    try:
-        exchange.cancel(SYMBOL, current_tp_id)
-        print("TP CANCELLED:", current_tp_id)
-        time.sleep(1)
-    except Exception as e:
-        print("TP cancel error:", e)
-
-    current_tp_id = None
+    if current_tp_id:
+        try:
+            exchange.cancel(SYMBOL, current_tp_id)
+            print("TP CANCELLED")
+            time.sleep(1)
+        except Exception as e:
+            print("TP cancel error:", e)
+        current_tp_id = None
 
 
 def cancel_sl():
     global current_sl_id
-
-    if current_sl_id is None:
-        return
-
-    try:
-        exchange.cancel(SYMBOL, current_sl_id)
-        print("SL CANCELLED:", current_sl_id)
-        time.sleep(1)
-    except Exception as e:
-        print("SL cancel error:", e)
-
-    current_sl_id = None
+    if current_sl_id:
+        try:
+            exchange.cancel(SYMBOL, current_sl_id)
+            print("SL CANCELLED")
+            time.sleep(1)
+        except Exception as e:
+            print("SL cancel error:", e)
+        current_sl_id = None
 
 
 def open_position(signal):
@@ -77,89 +69,92 @@ def open_position(signal):
     usd_size = max(account_value * POSITION_PERCENT, MIN_ORDER_USD)
 
     mids = exchange.info.all_mids()
-    sol_price = float(mids[SYMBOL])
+    price = float(mids[SYMBOL])
 
-    raw_size = usd_size / sol_price
-    min_size = MIN_ORDER_USD / sol_price
-    sol_size = max(round(raw_size, 2), round(min_size, 2))
-
-    print("SOL PRICE:", sol_price)
-    print("USD SIZE:", usd_size)
-    print("SOL SIZE:", sol_size)
+    size = round(usd_size / price, 2)
 
     is_buy = signal == "BUY"
 
-    print("Opening position:", signal)
+    print("OPEN:", signal)
 
-    result = exchange.market_open(SYMBOL, is_buy, sol_size)
-    print("ORDER RESULT:", result)
+    result = exchange.market_open(SYMBOL, is_buy, size)
 
     try:
         fill_price = float(
             result["response"]["data"]["statuses"][0]["filled"]["avgPx"]
         )
     except:
-        print("Fill price alınamadı")
+        print("Fill price yok")
         return
 
-    time.sleep(1)
+    # 🔥 MARKET OTURSUN
+    time.sleep(2)
 
+    # gerçek size çek
     state = exchange.info.user_state(account.address)
-
     size = 0
     for p in state["assetPositions"]:
         if p["position"]["coin"] == SYMBOL:
             size = abs(float(p["position"]["szi"]))
 
     if size == 0:
-        print("Position not found")
+        print("Pozisyon yok")
         return
 
     # ===== TP =====
     if is_buy:
         tp_price = format_price(fill_price * (1 + TP_PERCENT))
-        tp_is_buy = False
+        tp_side = False
     else:
         tp_price = format_price(fill_price * (1 - TP_PERCENT))
-        tp_is_buy = True
+        tp_side = True
 
-    tp_result = exchange.order(
+    time.sleep(1)
+
+    tp = exchange.order(
         SYMBOL,
-        tp_is_buy,
+        tp_side,
         size,
         tp_price,
-        {"limit": {"tif": "Gtc"}}
+        {
+            "limit": {"tif": "Gtc"},
+            "reduceOnly": True
+        }
     )
 
-    print("TP SET:", tp_price)
-
     try:
-        current_tp_id = tp_result["response"]["data"]["statuses"][0]["resting"]["oid"]
+        current_tp_id = tp["response"]["data"]["statuses"][0]["resting"]["oid"]
+        print("TP SET:", tp_price)
     except:
-        print("TP oid alınamadı")
+        print("TP hata")
+
+    # 🔥 TP ile SL aynı anda gitmesin
+    time.sleep(1.5)
 
     # ===== SL =====
     if is_buy:
         sl_price = format_price(fill_price * (1 - SL_PERCENT))
-        sl_is_buy = False
+        sl_side = False
     else:
         sl_price = format_price(fill_price * (1 + SL_PERCENT))
-        sl_is_buy = True
+        sl_side = True
 
-    sl_result = exchange.order(
+    sl = exchange.order(
         SYMBOL,
-        sl_is_buy,
+        sl_side,
         size,
         sl_price,
-        {"limit": {"tif": "Gtc"}}
+        {
+            "limit": {"tif": "Gtc"},
+            "reduceOnly": True
+        }
     )
 
-    print("SL SET:", sl_price)
-
     try:
-        current_sl_id = sl_result["response"]["data"]["statuses"][0]["resting"]["oid"]
+        current_sl_id = sl["response"]["data"]["statuses"][0]["resting"]["oid"]
+        print("SL SET:", sl_price)
     except:
-        print("SL oid alınamadı")
+        print("SL hata")
 
     current_position = signal
 
@@ -167,15 +162,11 @@ def open_position(signal):
 def close_position():
     global current_position
 
-    if current_position is None:
-        return
-
-    exchange.market_close(SYMBOL)
-
-    cancel_tp()
-    cancel_sl()
-
-    current_position = None
+    if current_position:
+        exchange.market_close(SYMBOL)
+        cancel_tp()
+        cancel_sl()
+        current_position = None
 
 
 def process_signal(signal):
@@ -194,11 +185,10 @@ def process_signal(signal):
 
 @app.post("/webhook")
 async def webhook(request: Request):
+    data = await request.json()
+    signal = data.get("signal")
 
-    body = await request.json()
-    signal = body.get("signal")
-
-    print("SIGNAL RECEIVED:", signal)
+    print("SIGNAL:", signal)
 
     if signal not in ["BUY", "SELL"]:
         return {"status": "ignored"}
