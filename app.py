@@ -102,7 +102,7 @@ def open_position(signal):
         result = exchange.market_open(SYMBOL, is_buy, size)
         print("MARKET OPEN RESULT:", result)
     except Exception as e:
-        print("ORDER HATA:", e)
+        print("MARKET OPEN HATA:", e)
         return
 
     print("Fill bekleniyor...")
@@ -112,7 +112,7 @@ def open_position(signal):
         return
 
     print("Fill price:", fill_price)
-    time.sleep(2)   # artırıldı
+    time.sleep(2)
 
     size = get_position_size()
     if size == 0:
@@ -122,10 +122,10 @@ def open_position(signal):
     # ===== TP (Trigger Order) =====
     if is_buy:
         tp_price = format_price(fill_price * (1 + TP_PERCENT))
-        tp_side = False   # Long → Sell to close
+        tp_side = False
     else:
         tp_price = format_price(fill_price * (1 - TP_PERCENT))
-        tp_side = True    # Short → Buy to close
+        tp_side = True
 
     print("TP Trigger koyuluyor... TP Price:", tp_price)
     try:
@@ -144,12 +144,15 @@ def open_position(signal):
             }
         )
         print("TP ORDER RESULT:", tp)
-        
-        try:
-            current_tp_id = tp["response"]["data"]["statuses"][0]["resting"]["oid"]
+
+        current_tp_id = None
+        if tp.get("status") == "ok" and tp.get("response", {}).get("data", {}).get("statuses"):
+            status = tp["response"]["data"]["statuses"][0]
+            if "resting" in status:
+                current_tp_id = status["resting"].get("oid")
+            elif "filled" in status:
+                current_tp_id = status["filled"].get("oid")
             print("TP OID:", current_tp_id)
-        except:
-            current_tp_id = None
     except Exception as e:
         print("TP hata:", e)
 
@@ -158,10 +161,10 @@ def open_position(signal):
     # ===== SL (Trigger Order) =====
     if is_buy:
         sl_price = format_price(fill_price * (1 - SL_PERCENT))
-        sl_side = False   # Long → Sell
+        sl_side = False
     else:
         sl_price = format_price(fill_price * (1 + SL_PERCENT))
-        sl_side = True    # Short → Buy
+        sl_side = True
 
     print("SL Trigger koyuluyor... SL Price:", sl_price)
     try:
@@ -180,17 +183,22 @@ def open_position(signal):
             }
         )
         print("SL ORDER RESULT:", sl)
-        
-        try:
-            current_sl_id = sl["response"]["data"]["statuses"][0]["resting"]["oid"]
+
+        current_sl_id = None
+        if sl.get("status") == "ok" and sl.get("response", {}).get("data", {}).get("statuses"):
+            status = sl["response"]["data"]["statuses"][0]
+            if "resting" in status:
+                current_sl_id = status["resting"].get("oid")
+            elif "filled" in status:
+                current_sl_id = status["filled"].get("oid")
             print("SL OID:", current_sl_id)
-        except:
-            current_sl_id = None
+        else:
+            print("SL order response beklenenden farklı:", sl)
     except Exception as e:
         print("SL hata:", e)
 
     current_position = signal
-    print("Pozisyon + TP + SL başarıyla kuruldu.\n")
+    print("Pozisyon + TP + SL kuruldu.\n")
 
 
 def close_position():
