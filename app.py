@@ -13,7 +13,8 @@ SYMBOL = "SOL"
 POSITION_PERCENT = 0.97
 TP_PERCENT = 0.004
 SL_PERCENT = 0.006
-MIN_ORDER_USD = 10
+MIN_ORDER_USD = 15   # artırıldı
+MIN_SIZE = 0.01      # kritik fix
 # ==================
 
 if not PRIVATE_KEY:
@@ -58,6 +59,29 @@ def cancel_sl():
         current_sl_id = None
 
 
+def wait_for_fill():
+    for _ in range(20):  # max 10 sn bekler
+        try:
+            state = exchange.info.user_state(account.address)
+            for p in state["assetPositions"]:
+                if p["position"]["coin"] == SYMBOL:
+                    size = float(p["position"]["szi"])
+                    if abs(size) > 0:
+                        return float(p["position"]["entryPx"])
+        except:
+            pass
+        time.sleep(0.5)
+    return None
+
+
+def get_position_size():
+    state = exchange.info.user_state(account.address)
+    for p in state["assetPositions"]:
+        if p["position"]["coin"] == SYMBOL:
+            return abs(float(p["position"]["szi"]))
+    return 0
+
+
 def open_position(signal):
     global current_position, current_tp_id, current_sl_id
 
@@ -68,32 +92,35 @@ def open_position(signal):
     usd_size = max(account_value * POSITION_PERCENT, MIN_ORDER_USD)
 
     price = float(exchange.info.all_mids()[SYMBOL])
-    size = round(usd_size / price, 3)
+    size = max(round(usd_size / price, 3), MIN_SIZE)
 
     is_buy = signal == "BUY"
 
+    print("ACCOUNT:", account_value)
+    print("PRICE:", price)
+    print("SIZE:", size)
+
     print("Pozisyon açılıyor:", signal)
 
-    result = exchange.market_open(SYMBOL, is_buy, size)
-
     try:
-        fill_price = float(
-            result["response"]["data"]["statuses"][0]["filled"]["avgPx"]
-        )
-    except:
-        print("Fill price yok")
+        result = exchange.market_open(SYMBOL, is_buy, size)
+        print("ORDER RESULT:", result)
+    except Exception as e:
+        print("ORDER HATA:", e)
         return
 
-    print("Pozisyon açıldı, 3 sn bekleniyor...")
-    time.sleep(3)
+    print("Fill bekleniyor...")
+    fill_price = wait_for_fill()
 
-    # pozisyon size çek
-    state = exchange.info.user_state(account.address)
-    size = 0
-    for p in state["assetPositions"]:
-        if p["position"]["coin"] == SYMBOL:
-            size = abs(float(p["position"]["szi"]))
+    if not fill_price:
+        print("Fill gelmedi → işlem açılmadı")
+        return
 
+    print("Fill price:", fill_price)
+
+    time.sleep(1)
+
+    size = get_position_size()
     if size == 0:
         print("Pozisyon yok")
         return
@@ -106,22 +133,21 @@ def open_position(signal):
         tp_price = format_price(fill_price * (1 - TP_PERCENT))
         tp_side = True
 
-    print("TP için 3 sn bekleniyor...")
-    time.sleep(3)
-
-    tp = exchange.order(
-        SYMBOL,
-        tp_side,
-        size,
-        tp_price,
-        {"limit": {"tif": "Gtc"}, "reduceOnly": True}
-    )
-
+    print("TP koyuluyor...")
     try:
+        tp = exchange.order(
+            SYMBOL,
+            tp_side,
+            size,
+            tp_price,
+            {"limit": {"tif": "Gtc"}, "reduceOnly": True}
+        )
         current_tp_id = tp["response"]["data"]["statuses"][0]["resting"]["oid"]
-        print("TP koyuldu:", tp_price)
-    except:
-        print("TP hata")
+        print("TP:", tp_price)
+    except Exception as e:
+        print("TP hata:", e)
+
+    time.sleep(1)
 
     # ===== SL =====
     if is_buy:
@@ -131,22 +157,19 @@ def open_position(signal):
         sl_price = format_price(fill_price * (1 + SL_PERCENT))
         sl_side = True
 
-    print("SL için 3 sn bekleniyor...")
-    time.sleep(3)
-
-    sl = exchange.order(
-        SYMBOL,
-        sl_side,
-        size,
-        sl_price,
-        {"limit": {"tif": "Gtc"}, "reduceOnly": True}
-    )
-
+    print("SL koyuluyor...")
     try:
+        sl = exchange.order(
+            SYMBOL,
+            sl_side,
+            size,
+            sl_price,
+            {"limit": {"tif": "Gtc"}, "reduceOnly": True}
+        )
         current_sl_id = sl["response"]["data"]["statuses"][0]["resting"]["oid"]
-        print("SL koyuldu:", sl_price)
-    except:
-        print("SL hata")
+        print("SL:", sl_price)
+    except Exception as e:
+        print("SL hata:", e)
 
     current_position = signal
 
@@ -155,7 +178,12 @@ def close_position():
     global current_position
 
     if current_position:
-        exchange.market_close(SYMBOL)
+        print("Pozisyon kapatılıyor...")
+        try:
+            exchange.market_close(SYMBOL)
+        except Exception as e:
+            print("Close hata:", e)
+
         cancel_tp()
         cancel_sl()
         current_position = None
