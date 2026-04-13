@@ -13,7 +13,7 @@ SYMBOL = "SOL"
 POSITION_PERCENT = 0.97
 TP_PERCENT = 0.005
 SL_PERCENT = 0.006
-MIN_ORDER_USD = 10
+MIN_ORDER_USD = 15
 # ==================
 
 if not PRIVATE_KEY:
@@ -22,159 +22,148 @@ if not PRIVATE_KEY:
 account = Account.from_key(PRIVATE_KEY)
 print("BOT ADDRESS:", account.address)
 
-exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
-print("✅ Exchange başarıyla başlatıldı.")
-
+exchange = None
 current_position = None
 current_tp_id = None
+current_sl_id = None
 
 
-def format_price(price: float) -> float:
-    return round(price, 2)
+def get_exchange():
+    global exchange
+    if exchange is None:
+        print("🔄 Exchange başlatılıyor...")
+        exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
+        print("✅ Exchange başarıyla başlatıldı.")
+    return exchange
 
 
-def get_account_value():
-    state = exchange.info.user_state(account.address)
-    return float(state["marginSummary"]["accountValue"])
+def format_price(raw_price: float) -> float:
+    return round(raw_price, 3)
 
 
-def cancel_tp():
-    global current_tp_id
-
-    if current_tp_id is None:
-        return
-
-    try:
-        exchange.cancel(SYMBOL, current_tp_id)
-        print("TP CANCELLED:", current_tp_id)
-        time.sleep(1)
-    except Exception as e:
-        print("TP cancel error:", e)
-
-    current_tp_id = None
-
-
-def get_position_size():
-    for i in range(12):
-        state = exchange.info.user_state(account.address)
-
-        for p in state["assetPositions"]:
-            if p["position"]["coin"] == SYMBOL:
-                size = abs(float(p["position"]["szi"]))
-                if size > 0:
-                    print(f"Position bulundu: {size}")
-                    return size
-
-        print(f"Pozisyon bekleniyor... ({i+1})")
-        time.sleep(1)
-
-    return 0
+def cancel_tp_sl():
+    global current_tp_id, current_sl_id
+    if current_tp_id or current_sl_id:
+        ex = get_exchange()
+        if current_tp_id:
+            try:
+                ex.cancel(SYMBOL, current_tp_id)
+                print("✅ TP CANCELLED")
+            except:
+                pass
+            current_tp_id = None
+        if current_sl_id:
+            try:
+                ex.cancel(SYMBOL, current_sl_id)
+                print("✅ SL CANCELLED")
+            except:
+                pass
+            current_sl_id = None
 
 
 def open_position(signal):
-    global current_position, current_tp_id
+    global current_position, current_tp_id, current_sl_id
+    print(f"[{time.strftime('%H:%M:%S')}] → {signal} pozisyonu açılıyor")
 
-    account_value = get_account_value()
+    ex = get_exchange()
+
+    account_value = float(ex.info.user_state(account.address)["marginSummary"]["accountValue"])
+    sol_price = float(ex.info.all_mids()[SYMBOL])
     usd_size = max(account_value * POSITION_PERCENT, MIN_ORDER_USD)
+    sol_size = round(usd_size / sol_price, 2)
+    if sol_size < 0.1:
+        sol_size = 0.1
 
-    mids = exchange.info.all_mids()
-    price = float(mids[SYMBOL])
-
-    size = round(usd_size / price, 2)
-
-    print(f"ACCOUNT: {account_value} | PRICE: {price} | SIZE: {size} | {signal}")
+    print(f"PRICE: {sol_price:.3f} | SIZE: {sol_size} | Direction: {'LONG' if signal == 'BUY' else 'SHORT'}")
 
     is_buy = signal == "BUY"
 
-    # MARKET ORDER
-    print("🚀 Market order gönderiliyor...")
-    result = exchange.market_open(SYMBOL, is_buy, size)
+    # Market Open
+    result = ex.market_open(SYMBOL, is_buy, sol_size)
     print("MARKET OPEN RESULT:", result)
 
+    # Fill price al
     try:
-        fill_price = float(
-            result["response"]["data"]["statuses"][0]["filled"]["avgPx"]
-        )
-    except:
-        print("❌ Fill price alınamadı")
+        fill_price = float(result["response"]["data"]["statuses"][0]["filled"]["avgPx"])
+        print(f"Fill Price: {fill_price}")
+    except Exception as e:
+        print("Fill price alınamadı:", e)
         return
 
-    # POSITION WAIT
-    size = get_position_size()
-    if size == 0:
-        print("❌ Position yok, TP/SL atlanıyor")
+    time.sleep(2)
+
+    # Gerçek pozisyon size kontrolü
+    state = ex.info.user_state(account.address)
+    size = 0.0
+    for p in state.get("assetPositions", []):
+        if p["position"]["coin"] == SYMBOL:
+            size = abs(float(p["position"]["szi"]))
+            break
+
+    if size < 0.05:
+        print("Pozisyon açılmadı")
         return
 
-    # ===== TP =====
+    # TP Trigger
     if is_buy:
         tp_price = format_price(fill_price * (1 + TP_PERCENT))
-        tp_is_buy = False
+        tp_side = False
     else:
         tp_price = format_price(fill_price * (1 - TP_PERCENT))
-        tp_is_buy = True
+        tp_side = True
 
-    tp_result = exchange.order(
-        SYMBOL,
-        tp_is_buy,
-        size,
-        tp_price,
-        {"limit": {"tif": "Gtc"}}
-    )
-
-    print("🎯 TP SET:", tp_price)
-
+    print(f"TP Trigger: {tp_price}")
     try:
-        current_tp_id = tp_result["response"]["data"]["statuses"][0]["resting"]["oid"]
-    except:
-        current_tp_id = None
+        tp = ex.order(
+            SYMBOL, tp_side, size, tp_price,
+            {"trigger": {"triggerPx": tp_price, "isMarket": True, "tpsl": "tp"}, "reduceOnly": True}
+        )
+        current_tp_id = tp["response"]["data"]["statuses"][0].get("resting", {}).get("oid")
+        print("✅ TP konuldu")
+    except Exception as e:
+        print("TP hatası:", e)
 
-    # ===== SL =====
+    time.sleep(2)
+
+    # SL Trigger
     if is_buy:
         sl_price = format_price(fill_price * (1 - SL_PERCENT))
-        sl_is_buy = False
+        sl_side = False
     else:
         sl_price = format_price(fill_price * (1 + SL_PERCENT))
-        sl_is_buy = True
+        sl_side = True
 
-    sl_result = exchange.order(
-        SYMBOL,
-        sl_is_buy,
-        size,
-        sl_price,
-        {"trigger": {"triggerPx": sl_price, "isMarket": True}}
-    )
-
-    print("🛑 SL SET:", sl_price)
+    print(f"SL Trigger: {sl_price}")
+    try:
+        sl = ex.order(
+            SYMBOL, sl_side, size, sl_price,
+            {"trigger": {"triggerPx": sl_price, "isMarket": True, "tpsl": "sl"}, "reduceOnly": True}
+        )
+        current_sl_id = sl["response"]["data"]["statuses"][0].get("resting", {}).get("oid")
+        print("✅ SL konuldu")
+    except Exception as e:
+        print("SL hatası:", e)
 
     current_position = signal
-    print(f"✅ {signal} pozisyonu tamamlandı.")
-
-
-def close_position():
-    global current_position
-
-    if current_position is None:
-        return
-
-    print("Pozisyon kapatılıyor...")
-    exchange.market_close(SYMBOL)
-    current_position = None
+    print(f"✅ {signal} pozisyonu + TP + SL tamamlandı.\n")
 
 
 def process_signal(signal):
     global current_position
+    print(f"WEBHOOK SIGNAL: {signal} | Mevcut pozisyon: {current_position}")
 
-    # aynı sinyal → işlem açma
-    if current_position == signal:
-        print("Aynı sinyal, işlem açılmadı")
-        return
+    cancel_tp_sl()
+    time.sleep(2)
 
-    cancel_tp()
-    time.sleep(1)
-
-    if current_position:
-        close_position()
-        time.sleep(2)
+    if current_position and current_position != signal:
+        print(f"Ters sinyal: {current_position} → {signal} | Pozisyon kapatılıyor...")
+        try:
+            get_exchange().market_close(SYMBOL)
+            print("Market close gönderildi")
+        except Exception as e:
+            print("Close hatası:", e)
+        current_position = None
+        time.sleep(2.5)
 
     open_position(signal)
 
@@ -183,21 +172,15 @@ def process_signal(signal):
 async def webhook(request: Request):
     body = await request.json()
     signal = body.get("signal")
-
-    print("SIGNAL RECEIVED:", signal)
-
+    print("WEBHOOK SIGNAL:", signal)
+    
     if signal not in ["BUY", "SELL"]:
         return {"status": "ignored"}
-
-    threading.Thread(
-        target=process_signal,
-        args=(signal,),
-        daemon=True
-    ).start()
-
+    
+    threading.Thread(target=process_signal, args=(signal,), daemon=True).start()
     return {"status": "ok"}
 
 
 @app.get("/")
 def root():
-    return {"status": "alive"}
+    return {"status": "alive", "current_position": current_position}
