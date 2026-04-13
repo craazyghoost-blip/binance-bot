@@ -67,14 +67,23 @@ def open_position(signal):
 
     ex = get_exchange()
 
+    # Hesap değeri ve fiyat al
     account_value = float(ex.info.user_state(account.address)["marginSummary"]["accountValue"])
     sol_price = float(ex.info.all_mids()[SYMBOL])
+
+    # USD miktarını hesapla (en önemli düzeltme burada)
     usd_size = max(account_value * POSITION_PERCENT, MIN_ORDER_USD)
-    sol_size = round(usd_size / sol_price, 2)
+
+    # SOL miktarını daha doğru hesapla
+    raw_size = usd_size / sol_price
+    sol_size = round(raw_size, 2)
+
+    # Minimum güvenli size kontrolü
     if sol_size < 0.1:
         sol_size = 0.1
 
-    print(f"PRICE: {sol_price:.3f} | SIZE: {sol_size} | Direction: {'LONG' if signal == 'BUY' else 'SHORT'}")
+    print(f"ACCOUNT VALUE: {account_value:.2f} USD")
+    print(f"PRICE: {sol_price:.3f} | TARGET USD: {usd_size:.2f} | CALCULATED SIZE: {sol_size} SOL")
 
     is_buy = signal == "BUY"
 
@@ -92,16 +101,18 @@ def open_position(signal):
 
     time.sleep(2)
 
-    # Gerçek pozisyon size kontrolü
+    # Gerçek açılan size kontrolü
     state = ex.info.user_state(account.address)
-    size = 0.0
+    actual_size = 0.0
     for p in state.get("assetPositions", []):
         if p["position"]["coin"] == SYMBOL:
-            size = abs(float(p["position"]["szi"]))
+            actual_size = abs(float(p["position"]["szi"]))
             break
 
-    if size < 0.05:
-        print("Pozisyon açılmadı")
+    print(f"Gerçek açılan size: {actual_size} SOL")
+
+    if actual_size < 0.05:
+        print("Pozisyon yeterince açılmadı")
         return
 
     # TP Trigger
@@ -115,7 +126,7 @@ def open_position(signal):
     print(f"TP Trigger: {tp_price}")
     try:
         tp = ex.order(
-            SYMBOL, tp_side, size, tp_price,
+            SYMBOL, tp_side, actual_size, tp_price,   # actual_size kullanıyoruz
             {"trigger": {"triggerPx": tp_price, "isMarket": True, "tpsl": "tp"}, "reduceOnly": True}
         )
         current_tp_id = tp["response"]["data"]["statuses"][0].get("resting", {}).get("oid")
@@ -136,7 +147,7 @@ def open_position(signal):
     print(f"SL Trigger: {sl_price}")
     try:
         sl = ex.order(
-            SYMBOL, sl_side, size, sl_price,
+            SYMBOL, sl_side, actual_size, sl_price,
             {"trigger": {"triggerPx": sl_price, "isMarket": True, "tpsl": "sl"}, "reduceOnly": True}
         )
         current_sl_id = sl["response"]["data"]["statuses"][0].get("resting", {}).get("oid")
