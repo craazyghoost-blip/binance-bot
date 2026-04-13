@@ -15,7 +15,6 @@ POSITION_PERCENT = 0.97
 TP_PERCENT = 0.004
 SL_PERCENT = 0.006
 MIN_ORDER_USD = 15
-MIN_SIZE = 0.01
 # ===========================================
 
 if not PRIVATE_KEY:
@@ -42,7 +41,7 @@ def get_exchange():
             except ClientError as e:
                 if e.status_code == 429:
                     wait = (2 ** attempt) * 5
-                    print(f"❌ 429 Rate Limit! {wait} saniye bekleniyor... (deneme {attempt+1}/5)")
+                    print(f"❌ 429 Rate Limit! {wait}s bekleniyor...")
                     time.sleep(wait)
                 else:
                     print(f"Exchange hatası: {e}")
@@ -61,7 +60,6 @@ def open_position(signal):
 
     ex = get_exchange()
 
-    # Account ve Price alma
     try:
         account_value = float(ex.info.user_state(account.address)["marginSummary"]["accountValue"])
         price = float(ex.info.all_mids()[SYMBOL])
@@ -70,10 +68,16 @@ def open_position(signal):
         return
 
     usd_size = max(account_value * POSITION_PERCENT, MIN_ORDER_USD)
-    size = max(round(usd_size / price, 3), MIN_SIZE)
+    
+    # === ÖNEMLİ DÜZELTME: Size hesaplama ===
+    raw_size = usd_size / price
+    size = round(raw_size, 2)                    # SOL için genellikle 2 decimal yeter
+    if size < 0.1:                               # Minimum makul size
+        size = 0.1
+    
     is_buy = signal == "BUY"
 
-    print(f"ACCOUNT: {account_value:.2f} | PRICE: {price} | SIZE: {size} | {'LONG' if is_buy else 'SHORT'}")
+    print(f"ACCOUNT: {account_value:.2f} | PRICE: {price} | RAW SIZE: {raw_size:.4f} → FINAL SIZE: {size} | {'LONG' if is_buy else 'SHORT'}")
 
     # Market Open
     print("Market order gönderiliyor...")
@@ -84,8 +88,8 @@ def open_position(signal):
         print(f"❌ MARKET OPEN HATA: {type(e).__name__} - {e}")
         return
 
-    # Fill bekle
-    print("Fill bekleniyor...")
+    # Fill kontrolü
+    print("Fill bekleniyor (max 10sn)...")
     fill_price = None
     for _ in range(20):
         try:
@@ -93,14 +97,14 @@ def open_position(signal):
             for p in state.get("assetPositions", []):
                 if p.get("position", {}).get("coin") == SYMBOL:
                     szi = float(p["position"].get("szi", 0))
-                    if abs(szi) > 0:
+                    if abs(szi) > 0.01:          # anlamlı pozisyon
                         fill_price = float(p["position"]["entryPx"])
-                        print(f"✅ Fill alındı → Entry: {fill_price}")
+                        print(f"✅ Fill alındı → Entry: {fill_price} | Size: {szi}")
                         break
             if fill_price:
                 break
-        except:
-            pass
+        except Exception as e:
+            print(f"User state hatası: {e}")
         time.sleep(0.5)
 
     if not fill_price:
@@ -108,9 +112,8 @@ def open_position(signal):
         return
 
     time.sleep(2)
-    current_position = signal
 
-    # ================== TP ==================
+    # TP
     if is_buy:
         tp_price = format_price(fill_price * (1 + TP_PERCENT))
         tp_side = False
@@ -128,7 +131,7 @@ def open_position(signal):
 
     time.sleep(2)
 
-    # ================== SL ==================
+    # SL
     if is_buy:
         sl_price = format_price(fill_price * (1 - SL_PERCENT))
         sl_side = False
@@ -144,20 +147,20 @@ def open_position(signal):
     except Exception as e:
         print(f"SL hatası: {e}")
 
+    current_position = signal
     print("✅ Pozisyon + TP + SL tamamlandı.\n")
 
 
 def process_signal(signal):
     global current_position
     if current_position and current_position != signal:
-        print("Yön değişti, mevcut pozisyon kapatılıyor...")
+        print("Yön değişti, pozisyon kapatılıyor...")
         try:
             get_exchange().market_close(SYMBOL)
         except:
             pass
         current_position = None
         time.sleep(1)
-
     open_position(signal)
 
 
