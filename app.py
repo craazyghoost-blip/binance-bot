@@ -54,9 +54,72 @@ def format_price(price):
     return float(f"{price:.3f}")
 
 
+def cancel_tp_sl():
+    """Eski TP ve SL'leri iptal eder"""
+    global current_tp_id, current_sl_id
+    ex = get_exchange()
+    cancelled = False
+
+    if current_tp_id:
+        try:
+            ex.cancel(SYMBOL, current_tp_id)
+            print(f"✅ Eski TP iptal edildi (ID: {current_tp_id})")
+            cancelled = True
+        except:
+            print("TP iptal edilemedi (zaten tetiklenmiş olabilir)")
+        current_tp_id = None
+
+    if current_sl_id:
+        try:
+            ex.cancel(SYMBOL, current_sl_id)
+            print(f"✅ Eski SL iptal edildi (ID: {current_sl_id})")
+            cancelled = True
+        except:
+            print("SL iptal edilemedi (zaten tetiklenmiş olabilir)")
+        current_sl_id = None
+
+    if not cancelled:
+        print("İptal edilecek TP/SL bulunamadı")
+
+
+def close_position_fully():
+    """Pozisyonu tamamen kapatır"""
+    global current_position
+    print("🔴 Mevcut pozisyon kapatılıyor...")
+
+    ex = get_exchange()
+    cancel_tp_sl()                    # önce TP/SL'leri iptal et
+
+    for attempt in range(3):
+        try:
+            print(f"Kapatma denemesi {attempt+1}/3")
+            ex.market_close(SYMBOL)
+            time.sleep(1.5)
+
+            # Kontrol et
+            state = ex.info.user_state(account.address)
+            size = 0
+            for p in state.get("assetPositions", []):
+                if p.get("position", {}).get("coin") == SYMBOL:
+                    size = abs(float(p["position"].get("szi", 0)))
+
+            if size < 0.01:
+                print("✅ Pozisyon tamamen kapatıldı.")
+                current_position = None
+                return True
+        except Exception as e:
+            print(f"Close hatası: {e}")
+
+        time.sleep(1)
+
+    print("⚠️ Pozisyon tam kapanmadı, devam ediliyor...")
+    current_position = None
+    return False
+
+
 def open_position(signal):
     global current_position, current_tp_id, current_sl_id
-    print(f"[{time.strftime('%H:%M:%S')}] SIGNAL İŞLENİYOR: {signal}")
+    print(f"[{time.strftime('%H:%M:%S')}] SIGNAL İŞLENİYOR → {signal}")
 
     ex = get_exchange()
 
@@ -64,56 +127,52 @@ def open_position(signal):
         account_value = float(ex.info.user_state(account.address)["marginSummary"]["accountValue"])
         price = float(ex.info.all_mids()[SYMBOL])
     except Exception as e:
-        print(f"❌ Hesap/Price alınamadı: {e}")
+        print(f"❌ Hesap veya fiyat alınamadı: {e}")
         return
 
     usd_size = max(account_value * POSITION_PERCENT, MIN_ORDER_USD)
-    
-    # === ÖNEMLİ DÜZELTME: Size hesaplama ===
-    raw_size = usd_size / price
-    size = round(raw_size, 2)                    # SOL için genellikle 2 decimal yeter
-    if size < 0.1:                               # Minimum makul size
+    size = round(usd_size / price, 2)
+    if size < 0.1:
         size = 0.1
-    
+
     is_buy = signal == "BUY"
+    print(f"ACCOUNT: {account_value:.2f} | PRICE: {price:.3f} | SIZE: {size} | {'LONG' if is_buy else 'SHORT'}")
 
-    print(f"ACCOUNT: {account_value:.2f} | PRICE: {price} | RAW SIZE: {raw_size:.4f} → FINAL SIZE: {size} | {'LONG' if is_buy else 'SHORT'}")
-
-    # Market Open
+    # === Pozisyon Aç ===
     print("Market order gönderiliyor...")
     try:
         result = ex.market_open(SYMBOL, is_buy, size)
         print("MARKET OPEN RESULT:", result)
     except Exception as e:
-        print(f"❌ MARKET OPEN HATA: {type(e).__name__} - {e}")
+        print(f"❌ MARKET OPEN HATA: {e}")
         return
 
-    # Fill kontrolü
-    print("Fill bekleniyor (max 10sn)...")
+    # Fill bekle
+    print("Fill bekleniyor...")
     fill_price = None
     for _ in range(20):
         try:
             state = ex.info.user_state(account.address)
             for p in state.get("assetPositions", []):
                 if p.get("position", {}).get("coin") == SYMBOL:
-                    szi = float(p["position"].get("szi", 0))
-                    if abs(szi) > 0.01:          # anlamlı pozisyon
+                    szi = abs(float(p["position"].get("szi", 0)))
+                    if szi > 0.01:
                         fill_price = float(p["position"]["entryPx"])
                         print(f"✅ Fill alındı → Entry: {fill_price} | Size: {szi}")
                         break
             if fill_price:
                 break
-        except Exception as e:
-            print(f"User state hatası: {e}")
+        except:
+            pass
         time.sleep(0.5)
 
     if not fill_price:
-        print("❌ Fill gelmedi! Pozisyon açılmadı.")
+        print("❌ Fill gelmedi! İşlem iptal.")
         return
 
     time.sleep(2)
 
-    # TP
+    # === TP Koy ===
     if is_buy:
         tp_price = format_price(fill_price * (1 + TP_PERCENT))
         tp_side = False
@@ -123,15 +182,18 @@ def open_position(signal):
 
     print(f"TP Trigger → {tp_price}")
     try:
-        tp = ex.order(SYMBOL, tp_side, size, tp_price,
-                      {"trigger": {"triggerPx": tp_price, "isMarket": True, "tpsl": "tp"}, "reduceOnly": True})
-        print("TP RESULT:", tp)
+        tp = ex.order(
+            SYMBOL, tp_side, size, tp_price,
+            {"trigger": {"triggerPx": tp_price, "isMarket": True, "tpsl": "tp"}, "reduceOnly": True}
+        )
+        current_tp_id = tp.get("response", {}).get("data", {}).get("statuses", [{}])[0].get("resting", {}).get("oid")
+        print("TP başarıyla konuldu")
     except Exception as e:
         print(f"TP hatası: {e}")
 
     time.sleep(2)
 
-    # SL
+    # === SL Koy ===
     if is_buy:
         sl_price = format_price(fill_price * (1 - SL_PERCENT))
         sl_side = False
@@ -141,26 +203,27 @@ def open_position(signal):
 
     print(f"SL Trigger → {sl_price}")
     try:
-        sl = ex.order(SYMBOL, sl_side, size, sl_price,
-                      {"trigger": {"triggerPx": sl_price, "isMarket": True, "tpsl": "sl"}, "reduceOnly": True})
-        print("SL RESULT:", sl)
+        sl = ex.order(
+            SYMBOL, sl_side, size, sl_price,
+            {"trigger": {"triggerPx": sl_price, "isMarket": True, "tpsl": "sl"}, "reduceOnly": True}
+        )
+        current_sl_id = sl.get("response", {}).get("data", {}).get("statuses", [{}])[0].get("resting", {}).get("oid")
+        print("SL başarıyla konuldu")
     except Exception as e:
         print(f"SL hatası: {e}")
 
     current_position = signal
-    print("✅ Pozisyon + TP + SL tamamlandı.\n")
+    print(f"✅ {signal} pozisyonu + TP + SL kuruldu.\n")
 
 
 def process_signal(signal):
     global current_position
+
     if current_position and current_position != signal:
-        print("Yön değişti, pozisyon kapatılıyor...")
-        try:
-            get_exchange().market_close(SYMBOL)
-        except:
-            pass
-        current_position = None
-        time.sleep(1)
+        print(f"🔄 TERS SİNYAL: {current_position} → {signal}")
+        close_position_fully()      # Eski TP/SL + pozisyon kapat
+        time.sleep(2.5)             # Ekstra güvenlik beklemesi
+
     open_position(signal)
 
 
@@ -169,6 +232,7 @@ async def webhook(request: Request):
     data = await request.json()
     signal = data.get("signal")
     print("SIGNAL:", signal)
+    
     if signal not in ["BUY", "SELL"]:
         return {"status": "ignored"}
     
