@@ -56,21 +56,9 @@ def cancel_all_orders():
         for o in open_orders:
             if o["coin"] == SYMBOL:
                 ex.cancel(SYMBOL, o["oid"])
-        print("🧹 Tüm açık emirler silindi")
+        print("🧹 Eski emirler temizlendi")
     except Exception as e:
         print("Cancel error:", e)
-
-
-def close_position():
-    ex = get_exchange()
-    state = ex.info.user_state(account.address)
-
-    for p in state.get("assetPositions", []):
-        if p["position"]["coin"] == SYMBOL:
-            size = float(p["position"]["szi"])
-            if size != 0:
-                ex.market_open(SYMBOL, size < 0, abs(size))
-                print("🔴 Pozisyon kapatıldı")
 
 
 # ===== TRADE =====
@@ -79,7 +67,7 @@ def open_position(signal):
 
     ex = get_exchange()
 
-    # önce temizle
+    # 🔥 HER ZAMAN TEMİZ BAŞLA
     cancel_all_orders()
 
     account_value = float(ex.info.user_state(account.address)["marginSummary"]["accountValue"])
@@ -150,11 +138,10 @@ def open_position(signal):
 def process_signal(signal):
     print(f"Sinyal: {signal}")
 
-    cancel_all_orders()
-
+    # 🔴 POZİSYON VARSA → IGNORE
     if is_position_open():
-        close_position()
-        time.sleep(1)
+        print("⛔ Pozisyon açık → sinyal ignore")
+        return
 
     open_position(signal)
 
