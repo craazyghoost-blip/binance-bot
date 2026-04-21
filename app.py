@@ -11,8 +11,8 @@ app = FastAPI()
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SYMBOL = "SOL"
 POSITION_PERCENT = 0.97
-TP_PERCENT = 0.02   # %2 TP
-SL_PERCENT = 0.03   # %3 SL
+TP_PERCENT = 0.02
+SL_PERCENT = 0.03
 MIN_ORDER_USD = 15
 # ==================
 
@@ -23,7 +23,6 @@ account = Account.from_key(PRIVATE_KEY)
 print("BOT ADDRESS:", account.address)
 
 exchange = None
-current_position = None
 current_tp_id = None
 current_sl_id = None
 
@@ -31,9 +30,7 @@ current_sl_id = None
 def get_exchange():
     global exchange
     if exchange is None:
-        print("🔄 Exchange başlatılıyor...")
         exchange = Exchange(account, base_url="https://api.hyperliquid.xyz")
-        print("✅ Exchange başarıyla başlatıldı.")
     return exchange
 
 
@@ -41,7 +38,7 @@ def format_price(raw_price: float) -> float:
     return round(raw_price, 3)
 
 
-# ✅ POZİSYON AÇIK MI KONTROL
+# ===== STATE =====
 def is_position_open():
     ex = get_exchange()
     state = ex.info.user_state(account.address)
@@ -54,12 +51,52 @@ def is_position_open():
     return False
 
 
-def open_position(signal):
-    global current_position, current_tp_id, current_sl_id
+def cancel_all_orders():
+    global current_tp_id, current_sl_id
+    ex = get_exchange()
 
-    print(f"[{time.strftime('%H:%M:%S')}] → {signal} açılıyor")
+    try:
+        open_orders = ex.info.open_orders(account.address)
+        for o in open_orders:
+            if o["coin"] == SYMBOL:
+                ex.cancel(SYMBOL, o["oid"])
+        print("🧹 Tüm açık emirler silindi")
+    except Exception as e:
+        print("Cancel error:", e)
+
+    current_tp_id = None
+    current_sl_id = None
+
+
+# ===== MONITOR (OCO SIMULATION) =====
+def monitor_position():
+    global current_tp_id, current_sl_id
+
+    while True:
+        try:
+            if not is_position_open():
+                if current_tp_id or current_sl_id:
+                    print("📴 Pozisyon kapandı → TP/SL temizleniyor")
+                    cancel_all_orders()
+        except Exception as e:
+            print("Monitor error:", e)
+
+        time.sleep(2)
+
+
+threading.Thread(target=monitor_position, daemon=True).start()
+
+
+# ===== TRADE =====
+def open_position(signal):
+    global current_tp_id, current_sl_id
+
+    print(f"{signal} açılıyor")
 
     ex = get_exchange()
+
+    # önce her şeyi temizle
+    cancel_all_orders()
 
     account_value = float(ex.info.user_state(account.address)["marginSummary"]["accountValue"])
     price = float(ex.info.all_mids()[SYMBOL])
@@ -110,7 +147,7 @@ def open_position(signal):
     current_tp_id = tp["response"]["data"]["statuses"][0].get("resting", {}).get("oid")
     print("✅ TP konuldu")
 
-    time.sleep(2)
+    time.sleep(1)
 
     # ===== SL =====
     if is_buy:
@@ -128,23 +165,21 @@ def open_position(signal):
     current_sl_id = sl["response"]["data"]["statuses"][0].get("resting", {}).get("oid")
     print("✅ SL konuldu")
 
-    current_position = signal
     print("✅ Pozisyon + TP + SL hazır\n")
 
 
-# ✅ SADELEŞTİRİLMİŞ SIGNAL LOGIC
 def process_signal(signal):
-    global current_position
-
     print(f"Sinyal: {signal}")
 
-    # 🔴 POZİSYON VARSA → IGNORE
-    if is_position_open():
-        print("⛔ Pozisyon açık → sinyal ignore")
-        return
+    # yeni sinyal → önce her şeyi kapat
+    cancel_all_orders()
 
-    # pozisyon yoksa aç
-    current_position = None
+    if is_position_open():
+        print("Pozisyon var → önce kapatılıyor")
+        ex = get_exchange()
+        ex.market_close(SYMBOL)
+        time.sleep(2)
+
     open_position(signal)
 
 
