@@ -23,8 +23,6 @@ account = Account.from_key(PRIVATE_KEY)
 print("BOT ADDRESS:", account.address)
 
 exchange = None
-current_tp_id = None
-current_sl_id = None
 
 
 def get_exchange():
@@ -45,14 +43,12 @@ def is_position_open():
 
     for p in state.get("assetPositions", []):
         if p["position"]["coin"] == SYMBOL:
-            size = abs(float(p["position"]["szi"]))
-            if size > 0:
+            if abs(float(p["position"]["szi"])) > 0:
                 return True
     return False
 
 
 def cancel_all_orders():
-    global current_tp_id, current_sl_id
     ex = get_exchange()
 
     try:
@@ -64,38 +60,26 @@ def cancel_all_orders():
     except Exception as e:
         print("Cancel error:", e)
 
-    current_tp_id = None
-    current_sl_id = None
 
+def close_position():
+    ex = get_exchange()
+    state = ex.info.user_state(account.address)
 
-# ===== MONITOR (OCO SIMULATION) =====
-def monitor_position():
-    global current_tp_id, current_sl_id
-
-    while True:
-        try:
-            if not is_position_open():
-                if current_tp_id or current_sl_id:
-                    print("📴 Pozisyon kapandı → TP/SL temizleniyor")
-                    cancel_all_orders()
-        except Exception as e:
-            print("Monitor error:", e)
-
-        time.sleep(2)
-
-
-threading.Thread(target=monitor_position, daemon=True).start()
+    for p in state.get("assetPositions", []):
+        if p["position"]["coin"] == SYMBOL:
+            size = float(p["position"]["szi"])
+            if size != 0:
+                ex.market_open(SYMBOL, size < 0, abs(size))
+                print("🔴 Pozisyon kapatıldı")
 
 
 # ===== TRADE =====
 def open_position(signal):
-    global current_tp_id, current_sl_id
-
     print(f"{signal} açılıyor")
 
     ex = get_exchange()
 
-    # önce her şeyi temizle
+    # önce temizle
     cancel_all_orders()
 
     account_value = float(ex.info.user_state(account.address)["marginSummary"]["accountValue"])
@@ -117,7 +101,7 @@ def open_position(signal):
         print("Fill price alınamadı")
         return
 
-    time.sleep(2)
+    time.sleep(1)
 
     # gerçek size
     state = ex.info.user_state(account.address)
@@ -139,15 +123,12 @@ def open_position(signal):
         tp_price = format_price(fill_price * (1 - TP_PERCENT))
         tp_side = True
 
-    tp = ex.order(
+    ex.order(
         SYMBOL, tp_side, actual_size, tp_price,
         {"trigger": {"triggerPx": tp_price, "isMarket": True, "tpsl": "tp"}, "reduceOnly": True}
     )
 
-    current_tp_id = tp["response"]["data"]["statuses"][0].get("resting", {}).get("oid")
     print("✅ TP konuldu")
-
-    time.sleep(1)
 
     # ===== SL =====
     if is_buy:
@@ -157,28 +138,23 @@ def open_position(signal):
         sl_price = format_price(fill_price * (1 + SL_PERCENT))
         sl_side = True
 
-    sl = ex.order(
+    ex.order(
         SYMBOL, sl_side, actual_size, sl_price,
         {"trigger": {"triggerPx": sl_price, "isMarket": True, "tpsl": "sl"}, "reduceOnly": True}
     )
 
-    current_sl_id = sl["response"]["data"]["statuses"][0].get("resting", {}).get("oid")
     print("✅ SL konuldu")
-
-    print("✅ Pozisyon + TP + SL hazır\n")
+    print("✅ Pozisyon hazır\n")
 
 
 def process_signal(signal):
     print(f"Sinyal: {signal}")
 
-    # yeni sinyal → önce her şeyi kapat
     cancel_all_orders()
 
     if is_position_open():
-        print("Pozisyon var → önce kapatılıyor")
-        ex = get_exchange()
-        ex.market_close(SYMBOL)
-        time.sleep(2)
+        close_position()
+        time.sleep(1)
 
     open_position(signal)
 
@@ -197,4 +173,4 @@ async def webhook(request: Request):
 
 @app.get("/")
 def root():
-    return {"status": "alive", "position_open": is_position_open()}
+    return {"status": "alive"}
