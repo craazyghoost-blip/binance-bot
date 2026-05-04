@@ -10,11 +10,11 @@ app = FastAPI()
 # ===== CONFIG =====
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 
-SYMBOL = "SOL"
+SYMBOL = "BTC"  # ✅ BTC olarak değiştirildi
 
 POSITION_PERCENT = 0.97
-TP_PERCENT = 0.02
-SL_PERCENT = 0.03
+TP_PERCENT = 0.005
+SL_PERCENT = 0.003
 
 MIN_ORDER_USD = 15
 
@@ -42,8 +42,9 @@ def get_exchange():
     return exchange
 
 
+# ✅ BTC price precision
 def format_price(raw_price: float) -> float:
-    return round(raw_price, 3)
+    return round(raw_price, 1)
 
 
 # ===== POSITION CHECK =====
@@ -110,14 +111,13 @@ def place_tp_sl(ex, is_buy, actual_size, fill_price):
     close_side = not is_buy
 
     # ===== TP =====
-
     if is_buy:
         tp_price = format_price(fill_price * (1 + TP_PERCENT))
     else:
         tp_price = format_price(fill_price * (1 - TP_PERCENT))
 
     try:
-        tp_result = ex.order(
+        ex.order(
             SYMBOL,
             close_side,
             actual_size,
@@ -131,22 +131,19 @@ def place_tp_sl(ex, is_buy, actual_size, fill_price):
             },
             reduce_only=True
         )
-
         print(f"✅ TP konuldu @ {tp_price}")
-        print("TP RESULT:", tp_result)
 
     except Exception as e:
         print("❌ TP ERROR:", e)
 
     # ===== SL =====
-
     if is_buy:
         sl_price = format_price(fill_price * (1 - SL_PERCENT))
     else:
         sl_price = format_price(fill_price * (1 + SL_PERCENT))
 
     try:
-        sl_result = ex.order(
+        ex.order(
             SYMBOL,
             close_side,
             actual_size,
@@ -160,9 +157,7 @@ def place_tp_sl(ex, is_buy, actual_size, fill_price):
             },
             reduce_only=True
         )
-
         print(f"✅ SL konuldu @ {sl_price}")
-        print("SL RESULT:", sl_result)
 
     except Exception as e:
         print("❌ SL ERROR:", e)
@@ -175,7 +170,6 @@ def open_position(signal):
 
     ex = get_exchange()
 
-    # HER ZAMAN TEMİZ BAŞLA
     cancel_all_orders()
 
     try:
@@ -194,10 +188,12 @@ def open_position(signal):
             MIN_ORDER_USD
         )
 
-        size = round(usd_size / price, 2)
+        # ✅ BTC size precision
+        size = round(usd_size / price, 4)
 
-        if size < 0.1:
-            size = 0.1
+        # ✅ BTC minimum size
+        if size < 0.001:
+            size = 0.001
 
         is_buy = signal == "BUY"
 
@@ -212,43 +208,26 @@ def open_position(signal):
         print("MARKET RESULT:", result)
 
         # ===== FILL PRICE =====
-
         try:
             fill_price = float(
                 result["response"]["data"]["statuses"][0]["filled"]["avgPx"]
             )
-
-            print("Fill price:", fill_price)
-
-        except Exception as e:
-            print("⚠️ Fill price alınamadı:", e)
-
-            # fallback
+        except:
             fill_price = price
 
-            print("Fallback price kullanılıyor:", fill_price)
-
         # ===== POSITION WAIT =====
-
         actual_size = 0.0
 
         for i in range(10):
             time.sleep(1)
-
             actual_size = get_actual_position_size()
 
-            print(f"Pozisyon kontrol {i+1}/10 -> {actual_size}")
-
-            if actual_size > 0.05:
+            if actual_size > 0.0005:
                 break
 
-        if actual_size < 0.05:
+        if actual_size < 0.0005:
             print("❌ Pozisyon açılmadı")
             return
-
-        print("Gerçek pozisyon size:", actual_size)
-
-        # ===== PLACE TP SL =====
 
         place_tp_sl(
             ex,
@@ -268,9 +247,8 @@ def open_position(signal):
 def process_signal(signal):
     print(f"Sinyal: {signal}")
 
-    # Pozisyon varsa ignore
     if is_position_open():
-        print("⛔ Pozisyon açık → sinyal ignore")
+        print("⛔ Pozisyon açık → ignore")
         return
 
     open_position(signal)
@@ -286,9 +264,7 @@ async def webhook(request: Request):
         signal = data.get("signal")
 
         if signal not in ["BUY", "SELL"]:
-            return {
-                "status": "ignored"
-            }
+            return {"status": "ignored"}
 
         threading.Thread(
             target=process_signal,
@@ -296,23 +272,15 @@ async def webhook(request: Request):
             daemon=True
         ).start()
 
-        return {
-            "status": "ok"
-        }
+        return {"status": "ok"}
 
     except Exception as e:
         print("WEBHOOK ERROR:", e)
-
-        return {
-            "status": "error",
-            "message": str(e)
-        }
+        return {"status": "error", "message": str(e)}
 
 
 # ===== ROOT =====
 
 @app.get("/")
 def root():
-    return {
-        "status": "alive"
-    }
+    return {"status": "alive"}
