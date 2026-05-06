@@ -8,19 +8,20 @@ from hyperliquid.exchange import Exchange
 app = FastAPI()
 
 # ===== CONFIG =====
+
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 
 SYMBOL = "BTC"
 
 POSITION_PERCENT = 0.98
 
-# İSTEDİĞİN ORANLAR
+# TP / SL
 TP_PERCENT = 0.002   # %0.2
 SL_PERCENT = 0.001   # %0.1
 
 MIN_ORDER_USD = 15
 
-# ==================
+# ===================
 
 if not PRIVATE_KEY:
     raise Exception("PRIVATE_KEY not set")
@@ -31,6 +32,8 @@ print("BOT ADDRESS:", account.address)
 
 exchange = None
 
+
+# ===== EXCHANGE =====
 
 def get_exchange():
     global exchange
@@ -59,7 +62,9 @@ def is_position_open():
         state = ex.info.user_state(account.address)
 
         for p in state.get("assetPositions", []):
+
             if p["position"]["coin"] == SYMBOL:
+
                 size = abs(float(p["position"]["szi"]))
 
                 if size > 0:
@@ -75,14 +80,21 @@ def is_position_open():
 # ===== CANCEL ORDERS =====
 
 def cancel_all_orders():
+
     ex = get_exchange()
 
     try:
+
         open_orders = ex.info.open_orders(account.address)
 
         for o in open_orders:
+
             if o["coin"] == SYMBOL:
+
                 ex.cancel(SYMBOL, o["oid"])
+
+                # RATE LIMIT KORUMA
+                time.sleep(1)
 
         print("🧹 Eski emirler temizlendi")
 
@@ -90,16 +102,20 @@ def cancel_all_orders():
         print("CANCEL ERROR:", repr(e))
 
 
-# ===== GET POSITION SIZE =====
+# ===== GET REAL POSITION SIZE =====
 
 def get_actual_position_size():
+
     ex = get_exchange()
 
     try:
+
         state = ex.info.user_state(account.address)
 
         for p in state.get("assetPositions", []):
+
             if p["position"]["coin"] == SYMBOL:
+
                 return abs(float(p["position"]["szi"]))
 
     except Exception as e:
@@ -123,7 +139,11 @@ def place_tp_sl(ex, is_buy, actual_size, fill_price):
 
     print("TP PRICE:", tp_price)
 
+    # RATE LIMIT KORUMA
+    time.sleep(4)
+
     try:
+
         tp_result = ex.order(
             SYMBOL,
             close_side,
@@ -142,6 +162,7 @@ def place_tp_sl(ex, is_buy, actual_size, fill_price):
         print("✅ TP OK:", tp_result)
 
     except Exception as e:
+
         print("❌ TP ERROR:", repr(e))
 
     # ===== SL =====
@@ -153,7 +174,11 @@ def place_tp_sl(ex, is_buy, actual_size, fill_price):
 
     print("SL PRICE:", sl_price)
 
+    # RATE LIMIT KORUMA
+    time.sleep(4)
+
     try:
+
         sl_result = ex.order(
             SYMBOL,
             close_side,
@@ -172,6 +197,7 @@ def place_tp_sl(ex, is_buy, actual_size, fill_price):
         print("✅ SL OK:", sl_result)
 
     except Exception as e:
+
         print("❌ SL ERROR:", repr(e))
 
 
@@ -187,11 +213,17 @@ def open_position(signal):
 
     try:
 
+        # RATE LIMIT KORUMA
+        time.sleep(2)
+
         state = ex.info.user_state(account.address)
 
         account_value = float(
             state["marginSummary"]["accountValue"]
         )
+
+        # RATE LIMIT KORUMA
+        time.sleep(2)
 
         price = float(
             ex.info.all_mids()[SYMBOL]
@@ -202,7 +234,7 @@ def open_position(signal):
             MIN_ORDER_USD
         )
 
-        # BTC SIZE
+        # BTC SIZE PRECISION
         size = round(usd_size / price, 5)
 
         is_buy = signal == "BUY"
@@ -210,6 +242,9 @@ def open_position(signal):
         print("MARKET ORDER GÖNDERİLİYOR")
         print("SIZE:", size)
         print("PRICE:", price)
+
+        # RATE LIMIT KORUMA
+        time.sleep(2)
 
         result = ex.market_open(
             SYMBOL,
@@ -222,10 +257,13 @@ def open_position(signal):
         # ===== FILL PRICE =====
 
         try:
+
             fill_price = float(
                 result["response"]["data"]["statuses"][0]["filled"]["avgPx"]
             )
+
         except:
+
             fill_price = price
 
         print("FILL PRICE:", fill_price)
@@ -236,7 +274,7 @@ def open_position(signal):
 
         for i in range(15):
 
-            time.sleep(1)
+            time.sleep(2)
 
             actual_size = get_actual_position_size()
 
@@ -246,13 +284,16 @@ def open_position(signal):
                 break
 
         if actual_size <= 0:
+
             print("❌ POZİSYON AÇILMADI")
             return
 
         print("GERÇEK SIZE:", actual_size)
 
-        # BTC'de exchange state otursun
-        time.sleep(3)
+        # EXCHANGE STATE OTURSUN
+        time.sleep(8)
+
+        # ===== TP / SL =====
 
         place_tp_sl(
             ex,
@@ -264,6 +305,7 @@ def open_position(signal):
         print("✅ POZİSYON HAZIR\n")
 
     except Exception as e:
+
         print("OPEN POSITION ERROR:", repr(e))
 
 
@@ -274,6 +316,7 @@ def process_signal(signal):
     print("SIGNAL:", signal)
 
     if is_position_open():
+
         print("⛔ ZATEN POZİSYON VAR")
         return
 
@@ -289,9 +332,9 @@ async def webhook(request: Request):
 
         data = await request.json()
 
-        signal = data.get("signal")
-
         print("WEBHOOK DATA:", data)
+
+        signal = data.get("signal")
 
         if signal not in ["BUY", "SELL"]:
             return {"status": "ignored"}
