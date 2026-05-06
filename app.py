@@ -10,11 +10,13 @@ app = FastAPI()
 # ===== CONFIG =====
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 
-SYMBOL = "BTC"  # ✅ BTC olarak değiştirildi
+SYMBOL = "BTC"
 
 POSITION_PERCENT = 0.98
-TP_PERCENT = 0.002
-SL_PERCENT = 0.001
+
+# İSTEDİĞİN ORANLAR
+TP_PERCENT = 0.002   # %0.2
+SL_PERCENT = 0.001   # %0.1
 
 MIN_ORDER_USD = 15
 
@@ -42,9 +44,10 @@ def get_exchange():
     return exchange
 
 
-# ✅ BTC price precision
-def format_price(raw_price: float) -> float:
-    return round(raw_price, 1)
+# ===== BTC PRICE FORMAT =====
+
+def format_price(price: float):
+    return round(price)
 
 
 # ===== POSITION CHECK =====
@@ -65,7 +68,7 @@ def is_position_open():
         return False
 
     except Exception as e:
-        print("Position check error:", e)
+        print("POSITION CHECK ERROR:", repr(e))
         return False
 
 
@@ -84,10 +87,10 @@ def cancel_all_orders():
         print("🧹 Eski emirler temizlendi")
 
     except Exception as e:
-        print("Cancel error:", e)
+        print("CANCEL ERROR:", repr(e))
 
 
-# ===== GET REAL POSITION SIZE =====
+# ===== GET POSITION SIZE =====
 
 def get_actual_position_size():
     ex = get_exchange()
@@ -100,24 +103,28 @@ def get_actual_position_size():
                 return abs(float(p["position"]["szi"]))
 
     except Exception as e:
-        print("Position size error:", e)
+        print("POSITION SIZE ERROR:", repr(e))
 
     return 0.0
 
 
-# ===== PLACE TP/SL =====
+# ===== PLACE TP / SL =====
 
 def place_tp_sl(ex, is_buy, actual_size, fill_price):
+
     close_side = not is_buy
 
     # ===== TP =====
+
     if is_buy:
         tp_price = format_price(fill_price * (1 + TP_PERCENT))
     else:
         tp_price = format_price(fill_price * (1 - TP_PERCENT))
 
+    print("TP PRICE:", tp_price)
+
     try:
-        ex.order(
+        tp_result = ex.order(
             SYMBOL,
             close_side,
             actual_size,
@@ -131,19 +138,23 @@ def place_tp_sl(ex, is_buy, actual_size, fill_price):
             },
             reduce_only=True
         )
-        print(f"✅ TP konuldu @ {tp_price}")
+
+        print("✅ TP OK:", tp_result)
 
     except Exception as e:
-        print("❌ TP ERROR:", e)
+        print("❌ TP ERROR:", repr(e))
 
     # ===== SL =====
+
     if is_buy:
         sl_price = format_price(fill_price * (1 - SL_PERCENT))
     else:
         sl_price = format_price(fill_price * (1 + SL_PERCENT))
 
+    print("SL PRICE:", sl_price)
+
     try:
-        ex.order(
+        sl_result = ex.order(
             SYMBOL,
             close_side,
             actual_size,
@@ -157,15 +168,17 @@ def place_tp_sl(ex, is_buy, actual_size, fill_price):
             },
             reduce_only=True
         )
-        print(f"✅ SL konuldu @ {sl_price}")
+
+        print("✅ SL OK:", sl_result)
 
     except Exception as e:
-        print("❌ SL ERROR:", e)
+        print("❌ SL ERROR:", repr(e))
 
 
 # ===== OPEN POSITION =====
 
 def open_position(signal):
+
     print(f"{signal} açılıyor")
 
     ex = get_exchange()
@@ -173,6 +186,7 @@ def open_position(signal):
     cancel_all_orders()
 
     try:
+
         state = ex.info.user_state(account.address)
 
         account_value = float(
@@ -188,16 +202,14 @@ def open_position(signal):
             MIN_ORDER_USD
         )
 
-        # ✅ BTC size precision
-        size = round(usd_size / price, 4)
-
-        # ✅ BTC minimum size
-        if size < 0.001:
-            size = 0.001
+        # BTC SIZE
+        size = round(usd_size / price, 5)
 
         is_buy = signal == "BUY"
 
-        print("Market order gönderiliyor...")
+        print("MARKET ORDER GÖNDERİLİYOR")
+        print("SIZE:", size)
+        print("PRICE:", price)
 
         result = ex.market_open(
             SYMBOL,
@@ -208,6 +220,7 @@ def open_position(signal):
         print("MARKET RESULT:", result)
 
         # ===== FILL PRICE =====
+
         try:
             fill_price = float(
                 result["response"]["data"]["statuses"][0]["filled"]["avgPx"]
@@ -215,19 +228,31 @@ def open_position(signal):
         except:
             fill_price = price
 
-        # ===== POSITION WAIT =====
+        print("FILL PRICE:", fill_price)
+
+        # ===== WAIT POSITION =====
+
         actual_size = 0.0
 
-        for i in range(10):
+        for i in range(15):
+
             time.sleep(1)
+
             actual_size = get_actual_position_size()
 
-            if actual_size > 0.0005:
+            print(f"POSITION CHECK {i+1}: {actual_size}")
+
+            if actual_size > 0:
                 break
 
-        if actual_size < 0.0005:
-            print("❌ Pozisyon açılmadı")
+        if actual_size <= 0:
+            print("❌ POZİSYON AÇILMADI")
             return
+
+        print("GERÇEK SIZE:", actual_size)
+
+        # BTC'de exchange state otursun
+        time.sleep(3)
 
         place_tp_sl(
             ex,
@@ -236,19 +261,20 @@ def open_position(signal):
             fill_price
         )
 
-        print("✅ Pozisyon hazır\n")
+        print("✅ POZİSYON HAZIR\n")
 
     except Exception as e:
-        print("OPEN POSITION ERROR:", e)
+        print("OPEN POSITION ERROR:", repr(e))
 
 
-# ===== SIGNAL PROCESS =====
+# ===== PROCESS SIGNAL =====
 
 def process_signal(signal):
-    print(f"Sinyal: {signal}")
+
+    print("SIGNAL:", signal)
 
     if is_position_open():
-        print("⛔ Pozisyon açık → ignore")
+        print("⛔ ZATEN POZİSYON VAR")
         return
 
     open_position(signal)
@@ -258,10 +284,14 @@ def process_signal(signal):
 
 @app.post("/webhook")
 async def webhook(request: Request):
+
     try:
+
         data = await request.json()
 
         signal = data.get("signal")
+
+        print("WEBHOOK DATA:", data)
 
         if signal not in ["BUY", "SELL"]:
             return {"status": "ignored"}
@@ -275,8 +305,13 @@ async def webhook(request: Request):
         return {"status": "ok"}
 
     except Exception as e:
-        print("WEBHOOK ERROR:", e)
-        return {"status": "error", "message": str(e)}
+
+        print("WEBHOOK ERROR:", repr(e))
+
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 
 # ===== ROOT =====
