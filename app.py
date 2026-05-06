@@ -21,6 +21,9 @@ SL_PERCENT = 0.001   # %0.1
 
 MIN_ORDER_USD = 15
 
+# SIGNAL SPAM KORUMA
+SIGNAL_COOLDOWN = 15
+
 # ===================
 
 if not PRIVATE_KEY:
@@ -31,6 +34,8 @@ account = Account.from_key(PRIVATE_KEY)
 print("BOT ADDRESS:", account.address)
 
 exchange = None
+
+last_signal_time = 0
 
 
 # ===== EXCHANGE =====
@@ -56,9 +61,11 @@ def format_price(price: float):
 # ===== POSITION CHECK =====
 
 def is_position_open():
+
     ex = get_exchange()
 
     try:
+
         state = ex.info.user_state(account.address)
 
         for p in state.get("assetPositions", []):
@@ -73,6 +80,7 @@ def is_position_open():
         return False
 
     except Exception as e:
+
         print("POSITION CHECK ERROR:", repr(e))
         return False
 
@@ -99,6 +107,7 @@ def cancel_all_orders():
         print("🧹 Eski emirler temizlendi")
 
     except Exception as e:
+
         print("CANCEL ERROR:", repr(e))
 
 
@@ -119,6 +128,7 @@ def get_actual_position_size():
                 return abs(float(p["position"]["szi"]))
 
     except Exception as e:
+
         print("POSITION SIZE ERROR:", repr(e))
 
     return 0.0
@@ -312,6 +322,18 @@ def open_position(signal):
 # ===== PROCESS SIGNAL =====
 
 def process_signal(signal):
+
+    global last_signal_time
+
+    now = time.time()
+
+    # SIGNAL SPAM KORUMA
+    if now - last_signal_time < SIGNAL_COOLDOWN:
+
+        print("⛔ SIGNAL COOLDOWN AKTİF")
+        return
+
+    last_signal_time = now
 
     print("SIGNAL:", signal)
 
