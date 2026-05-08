@@ -162,7 +162,7 @@ def place_tp_sl(ex, is_buy, actual_size, fill_price):
     # 1. TUR
     # =========================================================
 
-    # ===== SL FIRST =====
+    # ===== ÖNCE SL =====
 
     time.sleep(3)
 
@@ -189,9 +189,10 @@ def place_tp_sl(ex, is_buy, actual_size, fill_price):
 
         print("❌ SL 1 ERROR:", repr(e))
 
-    # ===== TP SECOND =====
+    # ===== SONRA TP =====
 
-    time.sleep(3)
+    # BURAYI 6 SANİYE YAPTIK
+    time.sleep(6)
 
     try:
 
@@ -217,7 +218,7 @@ def place_tp_sl(ex, is_buy, actual_size, fill_price):
         print("❌ TP 1 ERROR:", repr(e))
 
     # =========================================================
-    # 2. TUR
+    # 2. TUR (YEDEK)
     # =========================================================
 
     print("⏳ 2. TP/SL TURU BAŞLIYOR")
@@ -251,7 +252,8 @@ def place_tp_sl(ex, is_buy, actual_size, fill_price):
 
     # ===== 2. TP =====
 
-    time.sleep(3)
+    # BURAYI DA 6 SANİYE YAPTIK
+    time.sleep(6)
 
     try:
 
